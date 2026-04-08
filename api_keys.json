@@ -1,0 +1,49 @@
+﻿{
+    "value":  [
+                  {
+                      "name":  "anon",
+                      "api_key":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzYmpreXRkcWh6YnRpZGVlYnd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUwNDQ1NjYsImV4cCI6MjA5MDYyMDU2Nn0.P8H59qIbCam_COS3SUR_RR6SuNjnKvXz1xrJ0yIG5LQ",
+                      "id":  "anon",
+                      "type":  "legacy",
+                      "hash":  "THpvTZe1HnogU3YNCwDiQL8GLO_kwL26_Vcqk6ukZiw",
+                      "prefix":  "P8H59",
+                      "description":  "Legacy anon API key"
+                  },
+                  {
+                      "name":  "service_role",
+                      "api_key":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZzYmpreXRkcWh6YnRpZGVlYnd5Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NTA0NDU2NiwiZXhwIjoyMDkwNjIwNTY2fQ.YerUmMU-DPP-LqlXvVydtTCGzxfFLrDwZVsoWzHplvI",
+                      "id":  "service_role",
+                      "type":  "legacy",
+                      "hash":  "Jd7y8G1e_jo_TaVoIwETcvzIqS_O4HYmJVOz1JZwU2E",
+                      "prefix":  "YerUm",
+                      "description":  "Legacy service_role API key"
+                  },
+                  {
+                      "id":  "3286f444-3c19-499a-b1b2-6c1390b62284",
+                      "name":  "default",
+                      "type":  "publishable",
+                      "api_key":  "sb_publishable_j71Xa6mhC-M2ePjxdcOdkA_zV0DfZbL",
+                      "description":  null,
+                      "secret_jwt_template":  null,
+                      "hash":  "YQbuS6qzPo3czsvdqAtq2cYnxSYsolNA3Gva-bzSYHM",
+                      "prefix":  "sb_publishable_j71Xa",
+                      "inserted_at":  "2026-04-01T11:56:06.068498+00:00",
+                      "updated_at":  "2026-04-01T11:56:06.068498+00:00"
+                  },
+                  {
+                      "id":  "ce39c662-7ea6-4aba-a089-55046476c631",
+                      "name":  "default",
+                      "type":  "secret",
+                      "api_key":  "sb_secret_HTE33··························",
+                      "description":  null,
+                      "secret_jwt_template":  {
+                                                  "role":  "service_role"
+                                              },
+                      "hash":  "FIwnwGQBcusw4MChUGr33Qm_KfVgTAMtVTvAp_pyxgg",
+                      "prefix":  "sb_secret_HTE33",
+                      "inserted_at":  "2026-04-01T11:56:06.068498+00:00",
+                      "updated_at":  "2026-04-01T11:56:06.068498+00:00"
+                  }
+              ],
+    "Count":  4
+}

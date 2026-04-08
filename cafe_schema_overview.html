@@ -1,0 +1,293 @@
+
+<div id="erd"></div>
+<style>
+#erd { padding: 8px 0; }
+#erd svg { width: 100%; }
+</style>
+<script type="module">
+import mermaid from 'https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs';
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+await document.fonts.ready;
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  fontFamily: '"Anthropic Sans", sans-serif',
+  themeVariables: {
+    darkMode: dark,
+    fontSize: '12px',
+    fontFamily: '"Anthropic Sans", sans-serif',
+    lineColor: dark ? '#9c9a92' : '#73726c',
+    textColor: dark ? '#c2c0b6' : '#3d3d3a',
+    primaryColor: dark ? '#2a2a28' : '#f0eeea',
+    primaryBorderColor: dark ? '#5a5a55' : '#b0aea6',
+  },
+});
+
+const diagram = `erDiagram
+  COMPANY_MASTER {
+    uuid id PK
+    string company_code UK
+    string company_name
+    string address
+    string city
+    string state
+    string country
+    string phone
+    string email
+    boolean has_gst
+    string gstin
+    string pan_number
+    boolean has_table_management
+    boolean has_item_variants
+    string currency_code
+    string timezone
+    string logo_url
+    boolean is_active
+    timestamp created_at
+  }
+
+  COMPANY_HSN {
+    uuid id PK
+    uuid company_id FK
+    string hsn_code
+    string description
+    decimal gst_rate
+    decimal cgst_rate
+    decimal sgst_rate
+    decimal igst_rate
+    boolean is_active
+  }
+
+  COMPANY_PRINT_CONFIG {
+    uuid id PK
+    uuid company_id FK
+    string printer_type
+    string paper_size
+    boolean print_logo
+    boolean print_gstin
+    boolean print_hsn
+    boolean print_qr_code
+    string header_text
+    string footer_text
+    int copies_bill
+    int copies_kot
+    boolean auto_print_kot
+    boolean auto_print_bill
+  }
+
+  USER_MASTER {
+    uuid id PK
+    uuid company_id FK
+    string employee_code UK
+    string full_name
+    string username UK
+    string password_hash
+    string role
+    string phone
+    string email
+    boolean is_active
+    timestamp last_login
+    timestamp created_at
+  }
+
+  USER_PREFERENCE {
+    uuid id PK
+    uuid user_id FK
+    string ui_theme_type
+    string primary_color
+    string accent_color
+    string font_size
+    string layout_mode
+    boolean dark_mode
+    timestamp chosen_at
+  }
+
+  USER_PERMISSION {
+    uuid id PK
+    uuid user_id FK
+    boolean can_view_dashboard
+    boolean can_create_bill
+    boolean can_edit_bill
+    boolean can_cancel_bill
+    boolean can_apply_discount
+    boolean can_manage_items
+    boolean can_manage_tables
+    boolean can_view_reports
+    boolean can_manage_users
+    boolean can_manage_settings
+    boolean can_void_items
+  }
+
+  TABLE_MASTER {
+    uuid id PK
+    uuid company_id FK
+    string table_number
+    string section
+    int seating_capacity
+    string qr_code
+    boolean is_active
+  }
+
+  TABLE_SESSION {
+    uuid id PK
+    uuid table_id FK
+    uuid opened_by FK
+    uuid company_id FK
+    timestamp opened_at
+    timestamp closed_at
+    string status
+    int covers
+  }
+
+  ITEM_GROUP {
+    uuid id PK
+    uuid company_id FK
+    string group_name
+    string description
+    string image_url
+    int display_order
+    boolean show_subcategory
+    boolean is_active
+  }
+
+  ITEM_MASTER {
+    uuid id PK
+    uuid company_id FK
+    uuid item_group_id FK
+    uuid hsn_id FK
+    string item_code UK
+    string item_name
+    string description
+    string unit_of_measure
+    decimal base_rate
+    boolean has_variants
+    boolean is_taxable
+    boolean is_active
+    string image_url
+    int display_order
+  }
+
+  ITEM_VARIANT {
+    uuid id PK
+    uuid item_id FK
+    string variant_name
+    decimal rate_override
+    boolean is_active
+  }
+
+  BILL_MASTER {
+    uuid id PK
+    uuid company_id FK
+    uuid table_session_id FK
+    uuid billed_by FK
+    string bill_number UK
+    string bill_type
+    timestamp bill_date
+    decimal subtotal
+    decimal discount_amount
+    string discount_type
+    decimal taxable_amount
+    decimal cgst_amount
+    decimal sgst_amount
+    decimal igst_amount
+    decimal total_amount
+    decimal amount_paid
+    decimal change_amount
+    string payment_mode
+    string payment_ref
+    string status
+    string notes
+    boolean is_printed
+    timestamp printed_at
+  }
+
+  BILL_ITEM {
+    uuid id PK
+    uuid bill_id FK
+    uuid item_id FK
+    uuid variant_id FK
+    string item_name_snapshot
+    decimal rate_snapshot
+    decimal qty
+    decimal gross_amount
+    decimal discount_amount
+    string hsn_code_snapshot
+    decimal gst_rate_snapshot
+    decimal cgst_amount
+    decimal sgst_amount
+    decimal igst_amount
+    decimal net_amount
+    string notes
+    string kot_status
+    timestamp kot_printed_at
+  }
+
+  KOT_MASTER {
+    uuid id PK
+    uuid bill_id FK
+    uuid company_id FK
+    uuid table_session_id FK
+    string kot_number
+    timestamp created_at
+    uuid created_by FK
+    string status
+    boolean is_printed
+  }
+
+  KOT_ITEM {
+    uuid id PK
+    uuid kot_id FK
+    uuid bill_item_id FK
+    decimal qty
+    string notes
+    string status
+  }
+
+  COMPANY_MASTER ||--o{ COMPANY_HSN : "has"
+  COMPANY_MASTER ||--o| COMPANY_PRINT_CONFIG : "has"
+  COMPANY_MASTER ||--o{ USER_MASTER : "has"
+  COMPANY_MASTER ||--o{ TABLE_MASTER : "has"
+  COMPANY_MASTER ||--o{ ITEM_GROUP : "has"
+  COMPANY_MASTER ||--o{ ITEM_MASTER : "has"
+  COMPANY_MASTER ||--o{ BILL_MASTER : "has"
+  USER_MASTER ||--o| USER_PREFERENCE : "has"
+  USER_MASTER ||--o| USER_PERMISSION : "has"
+  TABLE_MASTER ||--o{ TABLE_SESSION : "has"
+  TABLE_SESSION ||--o{ BILL_MASTER : "linked"
+  ITEM_GROUP ||--o{ ITEM_MASTER : "contains"
+  COMPANY_HSN ||--o{ ITEM_MASTER : "assigned"
+  ITEM_MASTER ||--o{ ITEM_VARIANT : "has"
+  BILL_MASTER ||--o{ BILL_ITEM : "contains"
+  BILL_MASTER ||--o{ KOT_MASTER : "generates"
+  ITEM_MASTER ||--o{ BILL_ITEM : "referenced"
+  ITEM_VARIANT ||--o{ BILL_ITEM : "referenced"
+  KOT_MASTER ||--o{ KOT_ITEM : "contains"
+  BILL_ITEM ||--o{ KOT_ITEM : "mapped"
+`;
+
+const { svg } = await mermaid.render('erd-svg', diagram);
+document.getElementById('erd').innerHTML = svg;
+
+document.querySelectorAll('#erd svg .node').forEach(node => {
+  const firstPath = node.querySelector('path[d]');
+  if (!firstPath) return;
+  const d = firstPath.getAttribute('d');
+  const nums = d.match(/-?[\d.]+/g)?.map(Number);
+  if (!nums || nums.length < 8) return;
+  const xs = [nums[0], nums[2], nums[4], nums[6]];
+  const ys = [nums[1], nums[3], nums[5], nums[7]];
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('rx', '8');
+  for (const a of ['fill', 'stroke', 'stroke-width', 'class', 'style']) {
+    if (firstPath.hasAttribute(a)) rect.setAttribute(a, firstPath.getAttribute(a));
+  }
+  firstPath.replaceWith(rect);
+});
+document.querySelectorAll('#erd svg .row-rect-odd path, #erd svg .row-rect-even path').forEach(p => {
+  p.setAttribute('stroke', 'none');
+});
+</script>
