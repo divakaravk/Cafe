@@ -24,8 +24,7 @@ class BillsScreen extends ConsumerWidget {
           children: [
             // Header
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               decoration: BoxDecoration(
                 color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
                 border: Border(
@@ -38,6 +37,11 @@ class BillsScreen extends ConsumerWidget {
               ),
               child: Row(
                 children: [
+                  IconButton(
+                    icon: const Icon(Icons.menu_rounded),
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                  ),
+                  const SizedBox(width: 4),
                   Icon(
                     Icons.receipt_long_rounded,
                     color: isDark
@@ -55,8 +59,7 @@ class BillsScreen extends ConsumerWidget {
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.refresh_rounded),
-                    onPressed: () =>
-                        ref.invalidate(billsProvider(companyId)),
+                    onPressed: () => ref.invalidate(billsProvider(companyId)),
                     tooltip: 'Refresh',
                   ),
                 ],
@@ -76,8 +79,12 @@ class BillsScreen extends ConsumerWidget {
                             Icons.receipt_outlined,
                             size: 56,
                             color: isDark
-                                ? AppColors.textWhiteMuted.withValues(alpha: 0.3)
-                                : AppColors.textDarkMuted.withValues(alpha: 0.3),
+                                ? AppColors.textWhiteMuted.withValues(
+                                    alpha: 0.3,
+                                  )
+                                : AppColors.textDarkMuted.withValues(
+                                    alpha: 0.3,
+                                  ),
                           ),
                           const SizedBox(height: 12),
                           Text(
@@ -106,14 +113,13 @@ class BillsScreen extends ConsumerWidget {
                         onTap: () =>
                             _showBillDetails(context, bill, isDark, dateFormat),
                       ).animate().fadeIn(
-                            delay: Duration(milliseconds: 30 * index),
-                            duration: 300.ms,
-                          );
+                        delay: Duration(milliseconds: 30 * index),
+                        duration: 300.ms,
+                      );
                     },
                   );
                 },
-                loading: () =>
-                    const Center(child: CircularProgressIndicator()),
+                loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => Center(child: Text('Error: $e')),
               ),
             ),
@@ -123,8 +129,12 @@ class BillsScreen extends ConsumerWidget {
     );
   }
 
-  void _showBillDetails(BuildContext context, Bill bill, bool isDark,
-      DateFormat dateFormat) {
+  void _showBillDetails(
+    BuildContext context,
+    Bill bill,
+    bool isDark,
+    DateFormat dateFormat,
+  ) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -150,7 +160,9 @@ class BillsScreen extends ConsumerWidget {
                   if (bill.isVoided)
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: AppColors.error.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
@@ -213,15 +225,24 @@ class BillsScreen extends ConsumerWidget {
               ),
               const Divider(height: 24),
 
-              _detailRow('Subtotal', '₹${bill.subtotal.toStringAsFixed(0)}',
-                  isDark),
+              _detailRow(
+                'Subtotal',
+                '₹${bill.subtotal.toStringAsFixed(0)}',
+                isDark,
+              ),
               if (bill.taxAmount > 0)
                 _detailRow(
-                    'Tax', '₹${bill.taxAmount.toStringAsFixed(0)}', isDark),
+                  'Tax',
+                  '₹${bill.taxAmount.toStringAsFixed(0)}',
+                  isDark,
+                ),
               if (bill.discountAmount > 0)
-                _detailRow('Discount',
-                    '-₹${bill.discountAmount.toStringAsFixed(0)}', isDark,
-                    isDiscount: true),
+                _detailRow(
+                  'Discount',
+                  '-₹${bill.discountAmount.toStringAsFixed(0)}',
+                  isDark,
+                  isDiscount: true,
+                ),
               const Divider(height: 16),
               _detailRow(
                 'Total',
@@ -238,8 +259,13 @@ class BillsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _detailRow(String label, String value, bool isDark,
-      {bool isBold = false, bool isDiscount = false}) {
+  Widget _detailRow(
+    String label,
+    String value,
+    bool isDark, {
+    bool isBold = false,
+    bool isDiscount = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
@@ -260,10 +286,10 @@ class BillsScreen extends ConsumerWidget {
               color: isDiscount
                   ? AppColors.error
                   : (isBold
-                      ? (isDark
-                          ? AppColors.primaryAmber
-                          : AppColors.primaryOrange)
-                      : null),
+                        ? (isDark
+                              ? AppColors.primaryAmber
+                              : AppColors.primaryOrange)
+                        : null),
             ),
           ),
         ],
@@ -303,11 +329,7 @@ class _BillCard extends StatelessWidget {
                   color: _paymentColor.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(
-                  _paymentIcon,
-                  color: _paymentColor,
-                  size: 22,
-                ),
+                child: Icon(_paymentIcon, color: _paymentColor, size: 22),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -352,7 +374,9 @@ class _BillCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: _paymentColor.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(4),

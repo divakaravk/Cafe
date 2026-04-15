@@ -118,9 +118,8 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                           ],
                         ),
                         IconButton(
-                          icon: const Icon(Icons.logout_rounded, size: 20),
-                          onPressed: () =>
-                              ref.read(authStateProvider.notifier).signOut(),
+                          icon: const Icon(Icons.menu_rounded, size: 20),
+                          onPressed: () => Scaffold.of(context).openDrawer(),
                         ),
                       ],
                     ),

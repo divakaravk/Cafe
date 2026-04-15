@@ -37,6 +37,11 @@ class TablesScreen extends ConsumerWidget {
               ),
               child: Row(
                 children: [
+                  IconButton(
+                    icon: const Icon(Icons.menu_rounded),
+                    onPressed: () => Scaffold.of(context).openDrawer(),
+                  ),
+                  const SizedBox(width: 4),
                   Icon(
                     Icons.table_restaurant_rounded,
                     color: isDark

@@ -30,6 +30,12 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   bool _isGroupsOn = true;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  // Cart Animation State
+  String? _lastAddedItemName;
+  bool _showCartAnimation = false;
+  bool _isCartExpanded = false;
+  DateTime? _lastAddEvent;
+
   @override
   void initState() {
     super.initState();
@@ -70,7 +76,6 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
     return Scaffold(
       key: _scaffoldKey,
-      drawer: _buildDrawer(user, isDark),
       body: Stack(
         children: [
           Row(
@@ -151,6 +156,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           ),
           // Toggle arrows
           _buildSideToggles(isTablet),
+
+          // Swiggy Cart Animation Overlay
+          if (_showCartAnimation) _buildCartAnimationOverlay(cart, isDark),
         ],
       ),
       // Bottom sheet billing for mobile
@@ -178,6 +186,11 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
         bottom: false,
         child: Row(
           children: [
+            IconButton(
+              icon: const Icon(Icons.menu_rounded),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            ),
+            const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -257,184 +270,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                 ],
               ),
             ],
-            // Logout
-            IconButton(
-              icon: const Icon(
-                Icons.logout_rounded,
-                size: 20,
-                color: AppColors.error,
-              ),
-              onPressed: () => ref.read(authStateProvider.notifier).signOut(),
-            ),
           ],
         ),
       ),
     ).animate().fadeIn(duration: 300.ms);
-  }
-
-  // ─── NAVIGATION DRAWER ──────────────────────────────────
-  Widget _buildDrawer(UserProfile user, bool isDark) {
-    return Drawer(
-      backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-      child: Column(
-        children: [
-          DrawerHeader(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [AppColors.primaryAmber, AppColors.primaryOrange],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.restaurant_rounded,
-                    color: Colors.white,
-                    size: 42,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'CafePOS',
-                    style: GoogleFonts.inter(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                if (user.isAdmin) ...[
-                  _buildDrawerSection('ADMIN MASTERS', isDark),
-                  _buildDrawerItem(
-                    Icons.business_rounded,
-                    'Company Master',
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CompanyMasterScreen(),
-                      ),
-                    ),
-                    isDark,
-                  ),
-                  _buildDrawerItem(
-                    Icons.people_alt_rounded,
-                    'User Master',
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const UserMasterScreen(),
-                      ),
-                    ),
-                    isDark,
-                  ),
-                  _buildDrawerItem(
-                    Icons.inventory_2_rounded,
-                    'Item Master',
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const ItemMasterScreen(),
-                      ),
-                    ),
-                    isDark,
-                  ),
-                  _buildDrawerItem(
-                    Icons.category_rounded,
-                    'Item Group',
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const ItemMasterScreen(),
-                      ),
-                    ),
-                    isDark,
-                  ),
-                  _buildDrawerItem(
-                    Icons.table_bar_rounded,
-                    'Table KOT Master',
-                    () {},
-                    isDark,
-                  ),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Divider(height: 32),
-                  ),
-                ],
-                _buildDrawerSection('ACCOUNT', isDark),
-                _buildDrawerItem(
-                  Icons.person_outline_rounded,
-                  'My Profile',
-                  () {},
-                  isDark,
-                ),
-                _buildDrawerItem(
-                  Icons.logout_rounded,
-                  'Logout',
-                  () => ref.read(authStateProvider.notifier).signOut(),
-                  isDark,
-                  isError: true,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDrawerSection(String title, bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
-      child: Text(
-        title,
-        style: GoogleFonts.inter(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
-          letterSpacing: 1.2,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDrawerItem(
-    IconData icon,
-    String title,
-    VoidCallback onTap,
-    bool isDark, {
-    bool isError = false,
-  }) {
-    return ListTile(
-      leading: Icon(
-        icon,
-        size: 20,
-        color: isError
-            ? AppColors.error
-            : (isDark ? AppColors.textWhite : AppColors.textDark),
-      ),
-      title: Text(
-        title,
-        style: GoogleFonts.inter(
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-          color: isError
-              ? AppColors.error
-              : (isDark ? AppColors.textWhite : AppColors.textDark),
-        ),
-      ),
-      dense: true,
-      onTap: onTap,
-    );
   }
 
   // ─── SIDE TOGGLES ───────────────────────────────────────
@@ -448,7 +287,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           bottom: 0,
           child: Center(
             child: GestureDetector(
-              onTap: () => _scaffoldKey.currentState?.openDrawer(),
+              onTap: () => Scaffold.of(context).openDrawer(),
               child: Container(
                 height: 60,
                 width: 14,
@@ -465,11 +304,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                     ),
                   ],
                 ),
-                child: const Icon(
-                  Icons.chevron_right_rounded,
-                  color: Colors.white,
-                  size: 14,
-                ),
+                child: Icon(Icons.menu_rounded, color: Colors.white, size: 14),
               ),
             ),
           ),
@@ -669,10 +504,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: isTablet ? 5 : 4,
+        crossAxisCount: isTablet ? 6 : 5,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 0.75,
+        childAspectRatio: 0.8,
       ),
       itemCount: filteredMasters.length,
       itemBuilder: (context, index) {
@@ -686,7 +521,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                 if (item.hasVariants && item.variants.isNotEmpty) {
                   setState(() => _selectedItem = item);
                 } else {
-                  cartNotifier.addItem(item, null);
+                  _triggerCartAnimation(item, null);
                 }
               },
             )
@@ -715,10 +550,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: isTablet ? 5 : 4,
+        crossAxisCount: isTablet ? 6 : 5,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 0.75,
+        childAspectRatio: 0.8,
       ),
       itemCount: variants.length,
       itemBuilder: (context, index) {
@@ -735,7 +570,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               imageUrl: v.imageUrl ?? master.imageUrl,
               cartCount: cartItem.qty,
               isAvailable: v.isActive,
-              onTap: () => cartNotifier.addItem(master, v),
+              onTap: () => _triggerCartAnimation(master, v),
             )
             .animate()
             .fadeIn(delay: (20 * index).ms)
@@ -787,10 +622,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: isTablet ? 5 : 4,
+        crossAxisCount: isTablet ? 6 : 5,
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 0.75, // Taller to accommodate reduced width
+        childAspectRatio: 0.8,
       ),
       itemCount: filteredList.length,
       itemBuilder: (context, index) {
@@ -812,7 +647,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               imageUrl: variant?.imageUrl ?? master.imageUrl,
               cartCount: cartItem.qty,
               isAvailable: variant?.isActive ?? master.isActive,
-              onTap: () => cartNotifier.addItem(master, variant),
+              onTap: () => _triggerCartAnimation(master, variant),
             )
             .animate()
             .fadeIn(delay: (20 * index).ms)
@@ -890,6 +725,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                 ),
               ),
               const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.menu_rounded, size: 20),
+                onPressed: () => Scaffold.of(context).openDrawer(),
+              ),
               if (cart.isNotEmpty)
                 TextButton(
                   onPressed: () => cartNotifier.clear(),
@@ -1252,6 +1091,184 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
             ),
           );
         },
+      ),
+    );
+  }
+
+  // ─── CART ANIMATION TRIGGER ────────────────────────────
+  void _triggerCartAnimation(Item item, ItemVariant? variant) {
+    final cartNotifier = ref.read(cartProvider.notifier);
+    cartNotifier.addItem(item, variant);
+
+    final now = DateTime.now();
+    _lastAddEvent = now;
+    final displayName = variant?.variantName ?? item.itemName;
+
+    setState(() {
+      _lastAddedItemName = displayName;
+      _showCartAnimation = true;
+      _isCartExpanded = false;
+    });
+
+    // Sequence:
+    // 1. Move into view (handled by flutter_animate automatically via build)
+    // 2. Wait 400ms then expand
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (_lastAddEvent == now && mounted) {
+        setState(() => _isCartExpanded = true);
+      }
+    });
+
+    // 3. Hide after 3 seconds
+    Future.delayed(const Duration(milliseconds: 3000), () {
+      if (_lastAddEvent == now && mounted) {
+        setState(() => _showCartAnimation = false);
+      }
+    });
+  }
+
+  Widget _buildCartAnimationOverlay(List<CartItem> cart, bool isDark) {
+    if (cart.isEmpty) return const SizedBox.shrink();
+
+    final totalQty = cart.fold<int>(0, (sum, ci) => sum + ci.qty);
+    final subtotal = cart.fold<double>(0, (sum, ci) => sum + ci.total);
+
+    return Positioned(
+      bottom: 100,
+      left: 0,
+      right: 0,
+      child: Center(
+        child:
+            AnimatedContainer(
+                  duration: const Duration(milliseconds: 400),
+                  curve: Curves.elasticOut,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [AppColors.primaryAmber, AppColors.primaryOrange],
+                    ),
+                    borderRadius: BorderRadius.circular(25),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppColors.primaryOrange.withValues(alpha: 0.4),
+                        blurRadius: 20,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Main row (Always visible)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.shopping_basket_rounded,
+                              color: AppColors.primaryOrange,
+                              size: 16,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Added ${_lastAddedItemName ?? 'Item'}',
+                            style: GoogleFonts.inter(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Expanded content
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeInOut,
+                        child: _isCartExpanded
+                            ? Container(
+                                padding: const EdgeInsets.only(top: 12),
+                                margin: const EdgeInsets.only(top: 10),
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    top: BorderSide(
+                                      color: Colors.white.withValues(
+                                        alpha: 0.3,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '$totalQty ITEMS IN CART',
+                                          style: GoogleFonts.inter(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.8,
+                                            ),
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                        Text(
+                                          '₹${subtotal.toStringAsFixed(0)} total',
+                                          style: GoogleFonts.inter(
+                                            color: Colors.white,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(width: 30),
+                                    Text(
+                                      'VIEW CART',
+                                      style: GoogleFonts.inter(
+                                        color: Colors.white,
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w900,
+                                      ),
+                                    ),
+                                    const Icon(
+                                      Icons.arrow_forward_ios_rounded,
+                                      color: Colors.white,
+                                      size: 10,
+                                    ),
+                                  ],
+                                ),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ),
+                )
+                .animate()
+                .slideY(
+                  begin: 1.5,
+                  end: 0,
+                  duration: const Duration(milliseconds: 500),
+                  curve: Curves.easeOutBack,
+                )
+                .fadeIn(duration: const Duration(milliseconds: 300))
+                .shimmer(
+                  delay: const Duration(milliseconds: 600),
+                  duration: const Duration(milliseconds: 1000),
+                ),
       ),
     );
   }
