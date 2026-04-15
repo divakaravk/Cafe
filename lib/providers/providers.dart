@@ -40,13 +40,13 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
         input: input,
         password: password,
       );
-      
+
       final profile = UserProfile.fromJson(profileJson);
-      
+
       // Save session locally
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_sessionKey, jsonEncode(profileJson));
-      
+
       state = AsyncValue.data(profile);
     } catch (e, st) {
       state = AsyncValue.error(e.toString(), st);
@@ -67,93 +67,120 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
 }
 
 // ─── COMPANY ─────────────────────────────────────────────
-final companyProvider =
-    FutureProvider.family<Company?, String>((ref, companyId) async {
+final companyProvider = FutureProvider.family<Company?, String>((
+  ref,
+  companyId,
+) async {
   final json = await SupabaseService.getCompany(companyId);
   return json != null ? Company.fromJson(json) : null;
 });
 
 // ─── ITEM GROUPS ─────────────────────────────────────────
-final itemGroupsProvider =
-    FutureProvider.family<List<ItemGroup>, String>((ref, companyId) async {
+final itemGroupsProvider = FutureProvider.family<List<Item>, String>((
+  ref,
+  companyId,
+) async {
   final res = await SupabaseService.getItemGroups(companyId);
-  return res.map((e) => ItemGroup.fromJson(e)).toList();
+  return res.map((e) => Item.fromJson(e)).toList();
 });
 
 // ─── ALL ITEMS ───────────────────────────────────────────
-final allItemsProvider =
-    FutureProvider.family<List<Item>, String>((ref, companyId) async {
+final allItemsProvider = FutureProvider.family<List<Item>, String>((
+  ref,
+  companyId,
+) async {
   final res = await SupabaseService.getAllItems(companyId);
   return res.map((e) => Item.fromJson(e)).toList();
 });
 
 // ─── TABLES ──────────────────────────────────────────────
-final tablesProvider =
-    FutureProvider.family<List<CafeTable>, String>((ref, companyId) async {
+final tablesProvider = FutureProvider.family<List<CafeTable>, String>((
+  ref,
+  companyId,
+) async {
   final res = await SupabaseService.getTables(companyId);
   return res.map((e) => CafeTable.fromJson(e)).toList();
 });
 
 // ─── CART ────────────────────────────────────────────────
-final cartProvider =
-    NotifierProvider<CartNotifier, List<CartItem>>(CartNotifier.new);
+final cartProvider = NotifierProvider<CartNotifier, List<CartItem>>(
+  CartNotifier.new,
+);
 
 class CartNotifier extends Notifier<List<CartItem>> {
   @override
   List<CartItem> build() => [];
 
-  void addItem(Item item) {
-    final existingIndex = state.indexWhere((ci) => ci.item.id == item.id);
+  void addItem(Item item, [ItemVariant? variant]) {
+    final existingIndex = state.indexWhere(
+      (ci) => ci.item.id == item.id && ci.variant?.id == variant?.id,
+    );
     if (existingIndex >= 0) {
       state = [
         for (int i = 0; i < state.length; i++)
           if (i == existingIndex)
             CartItem(
-                item: state[i].item,
-                qty: state[i].qty + 1,
-                notes: state[i].notes)
+              item: state[i].item,
+              variant: state[i].variant,
+              qty: state[i].qty + 1,
+              notes: state[i].notes,
+            )
           else
             state[i],
       ];
     } else {
-      state = [...state, CartItem(item: item)];
+      state = [...state, CartItem(item: item, variant: variant)];
     }
   }
 
-  void removeItem(String itemId) {
-    state = state.where((ci) => ci.item.id != itemId).toList();
+  void removeItem(String itemId, [String? variantId]) {
+    state = state
+        .where((ci) => !(ci.item.id == itemId && ci.variant?.id == variantId))
+        .toList();
   }
 
-  void updateQty(String itemId, int qty) {
+  void updateQty(String itemId, int qty, [String? variantId]) {
     if (qty <= 0) {
-      removeItem(itemId);
+      removeItem(itemId, variantId);
       return;
     }
     state = [
       for (final ci in state)
-        if (ci.item.id == itemId)
-          CartItem(item: ci.item, qty: qty, notes: ci.notes)
+        if (ci.item.id == itemId && ci.variant?.id == variantId)
+          CartItem(
+            item: ci.item,
+            variant: ci.variant,
+            qty: qty,
+            notes: ci.notes,
+          )
         else
           ci,
     ];
   }
 
-  void incrementQty(String itemId) {
+  void incrementQty(String itemId, [String? variantId]) {
     state = [
       for (final ci in state)
-        if (ci.item.id == itemId)
-          CartItem(item: ci.item, qty: ci.qty + 1, notes: ci.notes)
+        if (ci.item.id == itemId && ci.variant?.id == variantId)
+          CartItem(
+            item: ci.item,
+            variant: ci.variant,
+            qty: ci.qty + 1,
+            notes: ci.notes,
+          )
         else
           ci,
     ];
   }
 
-  void decrementQty(String itemId) {
-    final ci = state.firstWhere((c) => c.item.id == itemId);
+  void decrementQty(String itemId, [String? variantId]) {
+    final ci = state.firstWhere(
+      (c) => c.item.id == itemId && c.variant?.id == variantId,
+    );
     if (ci.qty <= 1) {
-      removeItem(itemId);
+      removeItem(itemId, variantId);
     } else {
-      updateQty(itemId, ci.qty - 1);
+      updateQty(itemId, ci.qty - 1, variantId);
     }
   }
 
@@ -167,7 +194,8 @@ class CartNotifier extends Notifier<List<CartItem>> {
 // ─── SELECTED UI THEME ───────────────────────────────────
 final selectedUiThemeProvider =
     NotifierProvider<SelectedUiThemeNotifier, String>(
-        SelectedUiThemeNotifier.new);
+      SelectedUiThemeNotifier.new,
+    );
 
 class SelectedUiThemeNotifier extends Notifier<String> {
   @override
@@ -177,8 +205,9 @@ class SelectedUiThemeNotifier extends Notifier<String> {
 }
 
 // ─── DARK MODE TOGGLE ────────────────────────────────────
-final isDarkModeProvider =
-    NotifierProvider<IsDarkModeNotifier, bool>(IsDarkModeNotifier.new);
+final isDarkModeProvider = NotifierProvider<IsDarkModeNotifier, bool>(
+  IsDarkModeNotifier.new,
+);
 
 class IsDarkModeNotifier extends Notifier<bool> {
   @override
@@ -189,8 +218,9 @@ class IsDarkModeNotifier extends Notifier<bool> {
 }
 
 // ─── DISCOUNT ────────────────────────────────────────────
-final discountProvider =
-    NotifierProvider<DiscountNotifier, double>(DiscountNotifier.new);
+final discountProvider = NotifierProvider<DiscountNotifier, double>(
+  DiscountNotifier.new,
+);
 
 class DiscountNotifier extends Notifier<double> {
   @override
@@ -203,7 +233,8 @@ class DiscountNotifier extends Notifier<double> {
 // ─── SELECTED TABLE ──────────────────────────────────────
 final selectedTableProvider =
     NotifierProvider<SelectedTableNotifier, CafeTable?>(
-        SelectedTableNotifier.new);
+      SelectedTableNotifier.new,
+    );
 
 class SelectedTableNotifier extends Notifier<CafeTable?> {
   @override
@@ -213,8 +244,10 @@ class SelectedTableNotifier extends Notifier<CafeTable?> {
 }
 
 // ─── BILLS ───────────────────────────────────────────────
-final billsProvider =
-    FutureProvider.family<List<Bill>, String>((ref, companyId) async {
+final billsProvider = FutureProvider.family<List<Bill>, String>((
+  ref,
+  companyId,
+) async {
   final res = await SupabaseService.getBills(companyId);
   return res.map((e) => Bill.fromJson(e)).toList();
 });

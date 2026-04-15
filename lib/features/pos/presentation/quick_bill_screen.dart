@@ -55,8 +55,11 @@ class QuickBillScreen extends ConsumerWidget {
                       color: AppColors.accentCoral,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.bolt_rounded,
-                        color: Colors.white, size: 20),
+                    child: const Icon(
+                      Icons.bolt_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
                   ),
                   const SizedBox(width: 10),
                   Text(
@@ -70,7 +73,9 @@ class QuickBillScreen extends ConsumerWidget {
                   if (cart.isNotEmpty)
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
                       decoration: BoxDecoration(
                         color: isDark
                             ? AppColors.primaryAmber.withValues(alpha: 0.15)
@@ -90,17 +95,25 @@ class QuickBillScreen extends ConsumerWidget {
                     ),
                   const SizedBox(width: 8),
                   PopupMenuButton<String>(
-                    icon:
-                        const Icon(Icons.dashboard_customize_rounded, size: 20),
+                    icon: const Icon(
+                      Icons.dashboard_customize_rounded,
+                      size: 20,
+                    ),
                     onSelected: (value) {
-                      ref.read(selectedUiThemeProvider.notifier).setTheme(value);
+                      ref
+                          .read(selectedUiThemeProvider.notifier)
+                          .setTheme(value);
                     },
                     itemBuilder: (_) => const [
                       PopupMenuItem(
-                          value: 'QUICK_BILL', child: Text('Quick Bill')),
+                        value: 'QUICK_BILL',
+                        child: Text('Quick Bill'),
+                      ),
                       PopupMenuItem(value: 'MODERN', child: Text('Modern POS')),
                       PopupMenuItem(
-                          value: 'CLASSIC', child: Text('Classic POS')),
+                        value: 'CLASSIC',
+                        child: Text('Classic POS'),
+                      ),
                     ],
                   ),
                   IconButton(
@@ -112,16 +125,14 @@ class QuickBillScreen extends ConsumerWidget {
               ),
             ),
 
-            // ─── Item Grid ─────────────────────────────
             Expanded(
               child: itemGroupsAsync.when(
-                data: (groups) {
-                  final items = groups
-                      .expand((g) => g.items)
+                data: (items) {
+                  final filteredItems = items
                       .where((i) => i.isAvailable)
                       .toList();
 
-                  if (items.isEmpty) {
+                  if (filteredItems.isEmpty) {
                     return Center(
                       child: Text(
                         'No items available',
@@ -138,14 +149,14 @@ class QuickBillScreen extends ConsumerWidget {
                     padding: const EdgeInsets.all(12),
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 4,
-                      childAspectRatio: 1.5,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
-                    itemCount: items.length,
+                          crossAxisCount: 4,
+                          childAspectRatio: 1.5,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                        ),
+                    itemCount: filteredItems.length,
                     itemBuilder: (context, index) {
-                      final item = items[index];
+                      final item = filteredItems[index];
                       final cartQty = cart
                           .where((ci) => ci.item.id == item.id)
                           .fold<int>(0, (sum, ci) => sum + ci.qty);
@@ -153,17 +164,17 @@ class QuickBillScreen extends ConsumerWidget {
                       return _QuickItemTile(
                         item: item,
                         qty: cartQty,
-                        onTap: () => cartNotifier.addItem(item),
+                        onTap: () =>
+                            _handleItemTap(context, ref, item, cartNotifier),
                         isDark: isDark,
                       ).animate().fadeIn(
-                            delay: Duration(milliseconds: 20 * (index % 16)),
-                            duration: 250.ms,
-                          );
+                        delay: Duration(milliseconds: 20 * (index % 16)),
+                        duration: 250.ms,
+                      );
                     },
                   );
                 },
-                loading: () =>
-                    const Center(child: CircularProgressIndicator()),
+                loading: () => const Center(child: CircularProgressIndicator()),
                 error: (e, _) => Center(child: Text('Error: $e')),
               ),
             ),
@@ -173,8 +184,9 @@ class QuickBillScreen extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color:
-                      isDark ? AppColors.darkElevated : AppColors.lightElevated,
+                  color: isDark
+                      ? AppColors.darkElevated
+                      : AppColors.lightElevated,
                   border: Border(
                     top: BorderSide(
                       color: isDark
@@ -193,17 +205,21 @@ class QuickBillScreen extends ConsumerWidget {
                             spacing: 4,
                             runSpacing: 4,
                             children: cart
-                                .map((ci) => Chip(
-                                      label: Text(
-                                        '${ci.itemName} ×${ci.qty}',
-                                        style: const TextStyle(fontSize: 11),
-                                      ),
-                                      deleteIcon:
-                                          const Icon(Icons.close, size: 14),
-                                      onDeleted: () =>
-                                          cartNotifier.removeItem(ci.item.id),
-                                      visualDensity: VisualDensity.compact,
-                                    ))
+                                .map(
+                                  (ci) => Chip(
+                                    label: Text(
+                                      '${ci.itemName} ×${ci.qty}',
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                    deleteIcon: const Icon(
+                                      Icons.close,
+                                      size: 14,
+                                    ),
+                                    onDeleted: () =>
+                                        cartNotifier.removeItem(ci.item.id),
+                                    visualDensity: VisualDensity.compact,
+                                  ),
+                                )
                                 .toList(),
                           ),
                         ),
@@ -270,17 +286,23 @@ class QuickBillScreen extends ConsumerWidget {
         backgroundColor: color,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
-      child: Text(label,
-          style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13)),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13),
+      ),
     );
   }
 
-  Future<void> _pay(BuildContext context, WidgetRef ref, String mode,
-      double total, List<CartItem> cart, UserProfile user) async {
+  Future<void> _pay(
+    BuildContext context,
+    WidgetRef ref,
+    String mode,
+    double total,
+    List<CartItem> cart,
+    UserProfile user,
+  ) async {
     final discount = ref.read(discountProvider);
     final subtotal = cart.fold<double>(0, (sum, ci) => sum + ci.total);
     final discountAmount = subtotal * (discount / 100);
@@ -292,12 +314,14 @@ class QuickBillScreen extends ConsumerWidget {
         totalAmount: total,
         paymentMode: mode,
         billItems: cart
-            .map((ci) => {
-                  'item_id': ci.item.id,
-                  'qty': ci.qty,
-                  'rate': ci.rate,
-                  'tax_percentage': 0,
-                })
+            .map(
+              (ci) => {
+                'item_id': ci.item.id,
+                'qty': ci.qty,
+                'rate': ci.rate,
+                'tax_percentage': 0,
+              },
+            )
             .toList(),
       );
       ref.read(cartProvider.notifier).clear();
@@ -313,10 +337,108 @@ class QuickBillScreen extends ConsumerWidget {
     } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }
+  }
+
+  void _handleItemTap(
+    BuildContext context,
+    WidgetRef ref,
+    Item item,
+    CartNotifier cartNotifier,
+  ) {
+    final user = ref.read(authStateProvider).value;
+    final company = user != null
+        ? ref.read(companyProvider(user.companyId)).value
+        : null;
+    final hasCompanyVariants = company?.hasItemVariants ?? false;
+
+    if (hasCompanyVariants && item.hasVariants && item.variants.isNotEmpty) {
+      _showVariantPicker(context, item, cartNotifier);
+    } else {
+      cartNotifier.addItem(item);
+    }
+  }
+
+  void _showVariantPicker(
+    BuildContext context,
+    Item item,
+    CartNotifier cartNotifier,
+  ) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  item.itemName,
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Choose your option',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: isDark
+                    ? AppColors.textWhiteMuted
+                    : AppColors.textDarkMuted,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ...item.variants.map(
+              (v) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  v.variantName,
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                ),
+                trailing: Text(
+                  '₹${v.rate.toStringAsFixed(0)}',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700,
+                    color: isDark
+                        ? AppColors.primaryAmber
+                        : AppColors.primaryOrange,
+                  ),
+                ),
+                onTap: () {
+                  cartNotifier.addItem(item, v);
+                  Navigator.pop(context);
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -346,16 +468,16 @@ class _QuickItemTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: qty > 0
                 ? (isDark
-                    ? AppColors.primaryAmber.withValues(alpha: 0.12)
-                    : AppColors.primaryOrange.withValues(alpha: 0.08))
+                      ? AppColors.primaryAmber.withValues(alpha: 0.12)
+                      : AppColors.primaryOrange.withValues(alpha: 0.08))
                 : (isDark ? AppColors.darkCard : AppColors.lightCard),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: qty > 0
                   ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
                   : (isDark
-                      ? AppColors.darkBorder.withValues(alpha: 0.3)
-                      : AppColors.lightBorder.withValues(alpha: 0.4)),
+                        ? AppColors.darkBorder.withValues(alpha: 0.3)
+                        : AppColors.lightBorder.withValues(alpha: 0.4)),
               width: qty > 0 ? 1.5 : 1,
             ),
           ),

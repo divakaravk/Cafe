@@ -56,7 +56,9 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                   // Header
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
                       color: isDark
                           ? AppColors.darkSurface
@@ -77,8 +79,11 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                             color: AppColors.accentTeal,
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: const Icon(Icons.list_alt_rounded,
-                              color: Colors.white, size: 20),
+                          child: const Icon(
+                            Icons.list_alt_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
                         ),
                         const SizedBox(width: 10),
                         Text(
@@ -91,17 +96,25 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                         const Spacer(),
                         PopupMenuButton<String>(
                           icon: const Icon(
-                              Icons.dashboard_customize_rounded, size: 20),
-                          onSelected: (v) =>
-                              ref.read(selectedUiThemeProvider.notifier).setTheme(v),
+                            Icons.dashboard_customize_rounded,
+                            size: 20,
+                          ),
+                          onSelected: (v) => ref
+                              .read(selectedUiThemeProvider.notifier)
+                              .setTheme(v),
                           itemBuilder: (_) => const [
                             PopupMenuItem(
-                                value: 'QUICK_BILL',
-                                child: Text('Quick Bill')),
+                              value: 'QUICK_BILL',
+                              child: Text('Quick Bill'),
+                            ),
                             PopupMenuItem(
-                                value: 'MODERN', child: Text('Modern POS')),
+                              value: 'MODERN',
+                              child: Text('Modern POS'),
+                            ),
                             PopupMenuItem(
-                                value: 'CLASSIC', child: Text('Classic POS')),
+                              value: 'CLASSIC',
+                              child: Text('Classic POS'),
+                            ),
                           ],
                         ),
                         IconButton(
@@ -122,11 +135,11 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                           setState(() => _searchQuery = v.toLowerCase()),
                       decoration: InputDecoration(
                         hintText: 'Search items...',
-                        prefixIcon:
-                            const Icon(Icons.search_rounded, size: 20),
+                        prefixIcon: const Icon(Icons.search_rounded, size: 20),
                         isDense: true,
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 12),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 12,
+                        ),
                       ),
                     ),
                   ),
@@ -134,12 +147,11 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                   // Grouped item list
                   Expanded(
                     child: itemGroupsAsync.when(
-                      data: (groups) =>
-                          _buildGroupedList(groups, cart, cartNotifier, isDark),
+                      data: (items) =>
+                          _buildGroupedList(items, cart, cartNotifier, isDark),
                       loading: () =>
                           const Center(child: CircularProgressIndicator()),
-                      error: (e, _) =>
-                          Center(child: Text('Error: $e')),
+                      error: (e, _) => Center(child: Text('Error: $e')),
                     ),
                   ),
                 ],
@@ -151,8 +163,9 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
               Container(
                 width: 340,
                 decoration: BoxDecoration(
-                  color:
-                      isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                  color: isDark
+                      ? AppColors.darkSurface
+                      : AppColors.lightSurface,
                   border: Border(
                     left: BorderSide(
                       color: isDark
@@ -162,8 +175,15 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                   ),
                 ),
                 child: _buildCartPanel(
-                    cart, cartNotifier, subtotal, total, discountAmount,
-                    discount, isDark, user),
+                  cart,
+                  cartNotifier,
+                  subtotal,
+                  total,
+                  discountAmount,
+                  discount,
+                  isDark,
+                  user,
+                ),
               ),
           ],
         ),
@@ -176,18 +196,29 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
   }
 
   Widget _buildGroupedList(
-    List<ItemGroup> groups,
+    List<Item> masterItems,
     List<CartItem> cart,
     CartNotifier cartNotifier,
     bool isDark,
   ) {
+    final sections = masterItems
+        .map((i) => i.sectionLabel ?? 'Other')
+        .toSet()
+        .toList();
+    sections.sort();
+
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 80),
-      itemCount: groups.length,
+      itemCount: sections.length,
       itemBuilder: (context, gi) {
-        final group = groups[gi];
-        final items = group.items.where((i) {
+        final sectionName = sections[gi];
+        final items = masterItems.where((i) {
           if (!i.isAvailable) return false;
+          if (i.sectionLabel != (sectionName == 'Other' ? null : sectionName)) {
+            if (sectionName == 'Other' && i.sectionLabel != null) return false;
+            if (sectionName != 'Other' && i.sectionLabel != sectionName)
+              return false;
+          }
           if (_searchQuery.isNotEmpty) {
             return i.itemName.toLowerCase().contains(_searchQuery);
           }
@@ -201,15 +232,14 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
           children: [
             // Group header
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               color: isDark
                   ? AppColors.darkBg.withValues(alpha: 0.6)
                   : AppColors.lightBg,
               child: Row(
                 children: [
                   Text(
-                    group.groupName.toUpperCase(),
+                    sectionName.toUpperCase(),
                     style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
@@ -222,7 +252,9 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                   const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
                     decoration: BoxDecoration(
                       color: isDark
                           ? AppColors.darkBorder.withValues(alpha: 0.3)
@@ -248,8 +280,10 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                   .fold<int>(0, (s, ci) => s + ci.qty);
 
               return ListTile(
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 2,
+                ),
                 title: Text(
                   item.itemName,
                   style: GoogleFonts.inter(
@@ -274,7 +308,9 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                     if (cartQty > 0)
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: isDark
                               ? AppColors.primaryAmber.withValues(alpha: 0.15)
@@ -300,18 +336,107 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                             ? AppColors.primaryAmber
                             : AppColors.primaryOrange,
                       ),
-                      onPressed: () => cartNotifier.addItem(item),
+                      onPressed: () => _handleItemTap(item, cartNotifier),
                     ),
                   ],
                 ),
               ).animate().fadeIn(
-                    delay: Duration(milliseconds: 15 * entry.key),
-                    duration: 200.ms,
-                  );
+                delay: Duration(milliseconds: 15 * entry.key),
+                duration: 200.ms,
+              );
             }),
           ],
         );
       },
+    );
+  }
+
+  void _handleItemTap(Item item, CartNotifier cartNotifier) {
+    final user = ref.read(authStateProvider).value;
+    final company = user != null
+        ? ref.read(companyProvider(user.companyId)).value
+        : null;
+    final hasCompanyVariants = company?.hasItemVariants ?? false;
+
+    if (hasCompanyVariants && item.hasVariants && item.variants.isNotEmpty) {
+      _showVariantPicker(item: item, cartNotifier: cartNotifier);
+    } else {
+      cartNotifier.addItem(item);
+    }
+  }
+
+  void _showVariantPicker({
+    required Item item,
+    required CartNotifier cartNotifier,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  item.itemName,
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Choose your option',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: isDark
+                    ? AppColors.textWhiteMuted
+                    : AppColors.textDarkMuted,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ...item.variants.map(
+              (v) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(
+                  v.variantName,
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                ),
+                trailing: Text(
+                  '₹${v.rate.toStringAsFixed(0)}',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700,
+                    color: isDark
+                        ? AppColors.primaryAmber
+                        : AppColors.primaryOrange,
+                  ),
+                ),
+                onTap: () {
+                  cartNotifier.addItem(item, v);
+                  Navigator.pop(context);
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
     );
   }
 
@@ -342,9 +467,13 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
               if (cart.isNotEmpty)
                 TextButton(
                   onPressed: () => cartNotifier.clear(),
-                  child: Text('Clear',
-                      style: GoogleFonts.inter(
-                          color: AppColors.error, fontSize: 12)),
+                  child: Text(
+                    'Clear',
+                    style: GoogleFonts.inter(
+                      color: AppColors.error,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -363,17 +492,16 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                   ),
                 )
               : ListView(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   children: cart.map((ci) {
                     return CartItemRow(
                       cartItem: ci,
-                      onIncrement: () =>
-                          cartNotifier.incrementQty(ci.item.id),
-                      onDecrement: () =>
-                          cartNotifier.decrementQty(ci.item.id),
-                      onRemove: () =>
-                          cartNotifier.removeItem(ci.item.id),
+                      onIncrement: () => cartNotifier.incrementQty(ci.item.id),
+                      onDecrement: () => cartNotifier.decrementQty(ci.item.id),
+                      onRemove: () => cartNotifier.removeItem(ci.item.id),
                     );
                   }).toList(),
                 ),
@@ -396,18 +524,26 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('Subtotal', style: GoogleFonts.inter(fontSize: 13)),
-                    Text('₹${subtotal.toStringAsFixed(0)}',
-                        style: GoogleFonts.inter(
-                            fontSize: 13, fontWeight: FontWeight.w500)),
+                    Text(
+                      '₹${subtotal.toStringAsFixed(0)}',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Total',
-                        style: GoogleFonts.inter(
-                            fontSize: 18, fontWeight: FontWeight.w800)),
+                    Text(
+                      'Total',
+                      style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
                     Text(
                       '₹${total.toStringAsFixed(0)}',
                       style: GoogleFonts.inter(
@@ -423,14 +559,23 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                 const SizedBox(height: 14),
                 Row(
                   children: [
-                    _payBtn('Cash', AppColors.success,
-                        () => _pay('CASH', total, cart, user)),
+                    _payBtn(
+                      'Cash',
+                      AppColors.success,
+                      () => _pay('CASH', total, cart, user),
+                    ),
                     const SizedBox(width: 6),
-                    _payBtn('UPI', AppColors.info,
-                        () => _pay('UPI', total, cart, user)),
+                    _payBtn(
+                      'UPI',
+                      AppColors.info,
+                      () => _pay('UPI', total, cart, user),
+                    ),
                     const SizedBox(width: 6),
-                    _payBtn('Card', AppColors.warning,
-                        () => _pay('CARD', total, cart, user)),
+                    _payBtn(
+                      'Card',
+                      AppColors.warning,
+                      () => _pay('CARD', total, cart, user),
+                    ),
                   ],
                 ),
               ],
@@ -448,12 +593,12 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
           backgroundColor: color,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        child: Text(label,
-            style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13)),
+        child: Text(
+          label,
+          style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13),
+        ),
       ),
     );
   }
@@ -471,23 +616,21 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
         children: [
           Text(
             '$count items • ₹${total.toStringAsFixed(0)}',
-            style: GoogleFonts.inter(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-            ),
+            style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w700),
           ),
           const Spacer(),
-          ElevatedButton(
-            onPressed: () {},
-            child: const Text('Pay'),
-          ),
+          ElevatedButton(onPressed: () {}, child: const Text('Pay')),
         ],
       ),
     );
   }
 
   Future<void> _pay(
-      String mode, double total, List<CartItem> cart, UserProfile user) async {
+    String mode,
+    double total,
+    List<CartItem> cart,
+    UserProfile user,
+  ) async {
     final discount = ref.read(discountProvider);
     final subtotal = cart.fold<double>(0, (sum, ci) => sum + ci.total);
     final discountAmount = subtotal * (discount / 100);
@@ -499,12 +642,14 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
         totalAmount: total,
         paymentMode: mode,
         billItems: cart
-            .map((ci) => {
-                  'item_id': ci.item.id,
-                  'qty': ci.qty,
-                  'rate': ci.rate,
-                  'tax_percentage': 0,
-                })
+            .map(
+              (ci) => {
+                'item_id': ci.item.id,
+                'qty': ci.qty,
+                'rate': ci.rate,
+                'tax_percentage': 0,
+              },
+            )
             .toList(),
       );
       ref.read(cartProvider.notifier).clear();
@@ -521,7 +666,9 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text('Error: $e'), backgroundColor: AppColors.error),
+            content: Text('Error: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }

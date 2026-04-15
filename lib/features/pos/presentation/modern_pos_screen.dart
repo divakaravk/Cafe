@@ -7,6 +7,9 @@ import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/pos_widgets.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
+import '../../admin/presentation/company_master_screen.dart';
+import '../../admin/presentation/user_master_screen.dart';
+import '../../admin/presentation/item_master_screen.dart';
 
 /// Modern POS Screen — Tablet-first split layout
 /// Left: Item categories + grid | Right: sticky billing panel
@@ -19,9 +22,31 @@ class ModernPosScreen extends ConsumerStatefulWidget {
 
 class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     with TickerProviderStateMixin {
-  String? _selectedGroupId;
+  String? _selectedSection;
+  Item? _selectedItem;
   String _searchQuery = '';
   final _searchController = TextEditingController();
+  bool _showBillingPanel = true;
+  bool _isGroupsOn = true;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadSettings();
+    });
+  }
+
+  Future<void> _loadSettings() async {
+    final user = ref.read(authStateProvider).value;
+    if (user != null) {
+      final company = await ref.read(companyProvider(user.companyId).future);
+      if (company != null) {
+        setState(() => _isGroupsOn = company.hasItemVariants);
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -44,67 +69,93 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     final itemGroupsAsync = ref.watch(itemGroupsProvider(user.companyId));
 
     return Scaffold(
-      body: Row(
+      key: _scaffoldKey,
+      drawer: _buildDrawer(user, isDark),
+      body: Stack(
         children: [
-          // ─── LEFT: Items Panel ──────────────────────────
-          Expanded(
-            flex: isTablet ? 3 : 2,
-            child: Column(
-              children: [
-                // Top Bar
-                _buildTopBar(isDark, user),
-                // Search
-                _buildSearchBar(isDark),
-                // Category chips
-                itemGroupsAsync.when(
-                  data: (groups) => _buildCategoryBar(groups, isDark),
-                  loading: () => const SizedBox(height: 48),
-                  error: (e, _) => Padding(
-                    padding: const EdgeInsets.all(8),
-                    child: Text('Error: $e'),
-                  ),
-                ),
-                // Item grid
-                Expanded(
-                  child: itemGroupsAsync.when(
-                    data: (groups) => _buildItemGrid(
-                      groups,
-                      cart,
-                      cartNotifier,
-                      isDark,
-                      isTablet,
+          Row(
+            children: [
+              // ─── LEFT: Items Panel ──────────────────────────
+              Expanded(
+                flex: isTablet ? 3 : 2,
+                child: Column(
+                  children: [
+                    // Top Bar
+                    _buildTopBar(isDark, user),
+                    // Search
+                    _buildSearchBar(isDark),
+                    // Navigation Bar - section chips (Groups OFF) or item group chips (Groups ON)
+                    itemGroupsAsync.when(
+                      data: (items) => _isGroupsOn
+                          ? _buildItemGroupNav(items, isDark)
+                          : const SizedBox.shrink(),
+                      loading: () => _isGroupsOn
+                          ? const SizedBox(height: 56)
+                          : const SizedBox.shrink(),
+                      error: (_, __) => const SizedBox.shrink(),
                     ),
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (e, _) =>
-                        Center(child: Text('Error loading items: $e')),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // ─── RIGHT: Billing Panel ──────────────────────
-          if (isTablet)
-            Container(
-              width: 360,
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-                border: Border(
-                  left: BorderSide(
-                    color: isDark
-                        ? AppColors.darkBorder.withValues(alpha: 0.3)
-                        : AppColors.lightBorder.withValues(alpha: 0.4),
-                  ),
+                    // Menu area
+                    Expanded(
+                      child: itemGroupsAsync.when(
+                        data: (items) => _buildMenuArea(
+                          items,
+                          cart,
+                          cartNotifier,
+                          isDark,
+                          isTablet,
+                        ),
+                        loading: () =>
+                            const Center(child: CircularProgressIndicator()),
+                        error: (e, _) =>
+                            Center(child: Text('Error loading items: $e')),
+                      ),
+                    ),
+                    // Mobile Bottom Panel
+                    if (!isTablet && cart.isNotEmpty)
+                      _buildMobileOrderPanel(cart, isDark),
+                  ],
                 ),
               ),
-              child: _buildBillingPanel(cart, cartNotifier, isDark, user),
-            ),
+
+              // ─── RIGHT: Billing Panel ──────────────────────
+              if (isTablet && _showBillingPanel)
+                GestureDetector(
+                  onHorizontalDragEnd: (details) {
+                    final velocity = details.primaryVelocity ?? 0;
+                    if (velocity > 300) {
+                      // Swipe right → close billing panel
+                      setState(() => _showBillingPanel = false);
+                    } else if (velocity < -300) {
+                      // Swipe left → open drawer
+                      _scaffoldKey.currentState?.openDrawer();
+                    }
+                  },
+                  child: Container(
+                    width: 360,
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? AppColors.darkSurface
+                          : AppColors.lightSurface,
+                      border: Border(
+                        left: BorderSide(
+                          color: isDark
+                              ? AppColors.darkBorder.withValues(alpha: 0.3)
+                              : AppColors.lightBorder.withValues(alpha: 0.4),
+                        ),
+                      ),
+                    ),
+                    child: _buildBillingPanel(cart, cartNotifier, isDark, user),
+                  ),
+                ).animate().slideX(begin: 1.0, end: 0.0, duration: 200.ms),
+            ],
+          ),
+          // Toggle arrows
+          _buildSideToggles(isTablet),
         ],
       ),
       // Bottom sheet billing for mobile
       bottomSheet: !isTablet && cart.isNotEmpty
-          ? _buildMobileBillingBar(cart, isDark)
+          ? _buildMobileOrderPanel(cart, isDark)
           : null,
     );
   }
@@ -172,31 +223,296 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                     : Icons.dark_mode_rounded,
                 size: 20,
               ),
-              onPressed: () {
-                ref.read(isDarkModeProvider.notifier).toggle();
-              },
+              onPressed: () => ref.read(isDarkModeProvider.notifier).toggle(),
             ),
-            // UI mode switcher
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.dashboard_customize_rounded, size: 20),
-              onSelected: (value) {
-                ref.read(selectedUiThemeProvider.notifier).setTheme(value);
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(value: 'QUICK_BILL', child: Text('Quick Bill')),
-                PopupMenuItem(value: 'MODERN', child: Text('Modern POS')),
-                PopupMenuItem(value: 'CLASSIC', child: Text('Classic POS')),
-              ],
-            ),
+            // Item Groups Toggle (Hidden if company doesn't use variants)
+            if (ref
+                    .watch(companyProvider(user.companyId))
+                    .value
+                    ?.hasItemVariants ??
+                false) ...[
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Groups',
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Transform.scale(
+                    scale: 0.7,
+                    child: Switch(
+                      value: _isGroupsOn,
+                      activeColor: AppColors.primaryAmber,
+                      onChanged: (v) => setState(() {
+                        _isGroupsOn = v;
+                        _selectedItem = null;
+                        _selectedSection =
+                            null; // Clear category filter when flipping mode
+                      }),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             // Logout
             IconButton(
-              icon: const Icon(Icons.logout_rounded, size: 20),
+              icon: const Icon(
+                Icons.logout_rounded,
+                size: 20,
+                color: AppColors.error,
+              ),
               onPressed: () => ref.read(authStateProvider.notifier).signOut(),
             ),
           ],
         ),
       ),
     ).animate().fadeIn(duration: 300.ms);
+  }
+
+  // ─── NAVIGATION DRAWER ──────────────────────────────────
+  Widget _buildDrawer(UserProfile user, bool isDark) {
+    return Drawer(
+      backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+      child: Column(
+        children: [
+          DrawerHeader(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [AppColors.primaryAmber, AppColors.primaryOrange],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+            child: Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.restaurant_rounded,
+                    color: Colors.white,
+                    size: 42,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'CafePOS',
+                    style: GoogleFonts.inter(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: EdgeInsets.zero,
+              children: [
+                if (user.isAdmin) ...[
+                  _buildDrawerSection('ADMIN MASTERS', isDark),
+                  _buildDrawerItem(
+                    Icons.business_rounded,
+                    'Company Master',
+                    () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const CompanyMasterScreen(),
+                      ),
+                    ),
+                    isDark,
+                  ),
+                  _buildDrawerItem(
+                    Icons.people_alt_rounded,
+                    'User Master',
+                    () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const UserMasterScreen(),
+                      ),
+                    ),
+                    isDark,
+                  ),
+                  _buildDrawerItem(
+                    Icons.inventory_2_rounded,
+                    'Item Master',
+                    () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ItemMasterScreen(),
+                      ),
+                    ),
+                    isDark,
+                  ),
+                  _buildDrawerItem(
+                    Icons.category_rounded,
+                    'Item Group',
+                    () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const ItemMasterScreen(),
+                      ),
+                    ),
+                    isDark,
+                  ),
+                  _buildDrawerItem(
+                    Icons.table_bar_rounded,
+                    'Table KOT Master',
+                    () {},
+                    isDark,
+                  ),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Divider(height: 32),
+                  ),
+                ],
+                _buildDrawerSection('ACCOUNT', isDark),
+                _buildDrawerItem(
+                  Icons.person_outline_rounded,
+                  'My Profile',
+                  () {},
+                  isDark,
+                ),
+                _buildDrawerItem(
+                  Icons.logout_rounded,
+                  'Logout',
+                  () => ref.read(authStateProvider.notifier).signOut(),
+                  isDark,
+                  isError: true,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDrawerSection(String title, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
+      child: Text(
+        title,
+        style: GoogleFonts.inter(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+          letterSpacing: 1.2,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDrawerItem(
+    IconData icon,
+    String title,
+    VoidCallback onTap,
+    bool isDark, {
+    bool isError = false,
+  }) {
+    return ListTile(
+      leading: Icon(
+        icon,
+        size: 20,
+        color: isError
+            ? AppColors.error
+            : (isDark ? AppColors.textWhite : AppColors.textDark),
+      ),
+      title: Text(
+        title,
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: isError
+              ? AppColors.error
+              : (isDark ? AppColors.textWhite : AppColors.textDark),
+        ),
+      ),
+      dense: true,
+      onTap: onTap,
+    );
+  }
+
+  // ─── SIDE TOGGLES ───────────────────────────────────────
+  Widget _buildSideToggles(bool isTablet) {
+    return Stack(
+      children: [
+        // Left Edge Toggle (Open Drawer)
+        Positioned(
+          left: 0,
+          top: 0,
+          bottom: 0,
+          child: Center(
+            child: GestureDetector(
+              onTap: () => _scaffoldKey.currentState?.openDrawer(),
+              child: Container(
+                height: 60,
+                width: 14,
+                decoration: BoxDecoration(
+                  color: AppColors.primaryOrange.withValues(alpha: 0.9),
+                  borderRadius: const BorderRadius.horizontal(
+                    right: Radius.circular(8),
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.1),
+                      blurRadius: 4,
+                      offset: const Offset(2, 0),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.chevron_right_rounded,
+                  color: Colors.white,
+                  size: 14,
+                ),
+              ),
+            ),
+          ),
+        ),
+        // Right Edge Toggle (Billing Panel)
+        if (isTablet)
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: GestureDetector(
+                onTap: () =>
+                    setState(() => _showBillingPanel = !_showBillingPanel),
+                child: Container(
+                  height: 60,
+                  width: 14,
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryOrange.withValues(alpha: 0.9),
+                    borderRadius: const BorderRadius.horizontal(
+                      left: Radius.circular(8),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 4,
+                        offset: const Offset(-2, 0),
+                      ),
+                    ],
+                  ),
+                  child: Icon(
+                    _showBillingPanel
+                        ? Icons.chevron_right_rounded
+                        : Icons.chevron_left_rounded,
+                    color: Colors.white,
+                    size: 14,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   // ─── SEARCH BAR ─────────────────────────────────────────
@@ -225,28 +541,38 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     );
   }
 
-  // ─── CATEGORY BAR ──────────────────────────────────────
-  Widget _buildCategoryBar(List<ItemGroup> groups, bool isDark) {
-    return SizedBox(
-      height: 48,
+  // ─── TOP CATEGORY NAVIGATION (Groups OFF — section labels) ─────
+  Widget _buildTopCategoryNav(List<Item> items, bool isDark) {
+    final sections = items
+        .map((i) => i.sectionLabel)
+        .where((s) => s != null)
+        .toSet()
+        .toList();
+    sections.sort();
+
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         children: [
-          GroupChip(
+          ItemCategoryChip(
             label: 'All',
-            isSelected: _selectedGroupId == null,
-            onTap: () => setState(() => _selectedGroupId = null),
+            isSelected: _selectedSection == null,
+            onTap: () => setState(() {
+              _selectedSection = null;
+              _selectedItem = null;
+            }),
           ),
-          const SizedBox(width: 8),
-          ...groups.map(
-            (g) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: GroupChip(
-                label: g.groupName,
-                isSelected: _selectedGroupId == g.id,
-                onTap: () => setState(() => _selectedGroupId = g.id),
-              ),
+          ...sections.map(
+            (s) => ItemCategoryChip(
+              label: s!,
+              isSelected: _selectedSection == s,
+              onTap: () => setState(() {
+                _selectedSection = s;
+                _selectedItem = null;
+              }),
             ),
           ),
         ],
@@ -254,156 +580,268 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     );
   }
 
-  // ─── ITEM GRID ─────────────────────────────────────────
-  Widget _buildItemGrid(
-    List<ItemGroup> groups,
+  // ─── ITEM GROUP NAVIGATION (Groups ON — master items with variants) ─────
+  Widget _buildItemGroupNav(List<Item> items, bool isDark) {
+    // Only show items that have variants as "groups"
+    final groups = items
+        .where((i) => i.hasVariants && i.variants.isNotEmpty)
+        .toList();
+
+    return Container(
+      height: 56,
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        children: [
+          ItemCategoryChip(
+            label: 'All',
+            isSelected: _selectedItem == null,
+            onTap: () => setState(() => _selectedItem = null),
+          ),
+          ...groups.map(
+            (g) => ItemCategoryChip(
+              label: g.itemName,
+              isSelected: _selectedItem?.id == g.id,
+              onTap: () => setState(() => _selectedItem = g),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── MENU AREA ──────────────────────────────────────────
+  Widget _buildMenuArea(
+    List<Item> masterItems,
     List<CartItem> cart,
     CartNotifier cartNotifier,
     bool isDark,
     bool isTablet,
   ) {
-    // Flatten items from groups
-    List<Item> items = [];
-    for (final group in groups) {
-      if (_selectedGroupId != null && group.id != _selectedGroupId) continue;
-      items.addAll(group.items.where((i) => i.isAvailable));
-    }
-
-    // Apply search
-    if (_searchQuery.isNotEmpty) {
-      items = items
-          .where((i) => i.itemName.toLowerCase().contains(_searchQuery))
-          .toList();
-    }
-
-    if (items.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.restaurant_menu_rounded,
-              size: 48,
-              color: isDark
-                  ? AppColors.textWhiteMuted
-                  : AppColors.textDarkMuted,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'No items found',
-              style: GoogleFonts.inter(
-                fontSize: 15,
-                color: isDark
-                    ? AppColors.textWhiteMuted
-                    : AppColors.textDarkMuted,
-              ),
-            ),
-          ],
-        ),
+    if (!_isGroupsOn) {
+      // FLAT VIEW — show all items + variants flattened
+      return _buildVariantGrid(
+        masterItems,
+        cart,
+        cartNotifier,
+        isDark,
+        isTablet,
       );
     }
 
-    final crossAxisCount = isTablet ? 4 : 3;
+    // GROUPED VIEW
+    if (_selectedItem != null) {
+      // A specific group is selected → show its variants
+      return _buildDrillDownVariants(
+        _selectedItem!,
+        cart,
+        cartNotifier,
+        isDark,
+        isTablet,
+      );
+    }
+
+    // No group selected → show all parent item groups as tiles
+    return _buildGroupGrid(masterItems, cart, cartNotifier, isDark, isTablet);
+  }
+
+  // ─── Phase 1: Parent Item Grid ──────────────────────────
+  Widget _buildGroupGrid(
+    List<Item> masterItems,
+    List<CartItem> cart,
+    CartNotifier cartNotifier,
+    bool isDark,
+    bool isTablet,
+  ) {
+    // Filter master items by section
+    final filteredMasters = masterItems.where((i) {
+      final matchesSection =
+          _selectedSection == null || i.sectionLabel == _selectedSection;
+      final matchesSearch =
+          _searchQuery.isEmpty ||
+          i.itemName.toLowerCase().contains(_searchQuery.toLowerCase());
+      return matchesSection && matchesSearch;
+    }).toList();
+
+    if (filteredMasters.isEmpty) return _buildEmptyState(isDark);
 
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        childAspectRatio: 1.3,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
+        crossAxisCount: isTablet ? 5 : 4,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 0.75,
       ),
-      itemCount: items.length,
+      itemCount: filteredMasters.length,
       itemBuilder: (context, index) {
-        final item = items[index];
+        final item = filteredMasters[index];
         final isInCart = cart.any((ci) => ci.item.id == item.id);
+
         return ItemGridTile(
-          item: item,
-          isInCart: isInCart,
-          onTap: () => _handleItemTap(item, groups, cartNotifier),
-        ).animate().fadeIn(
-          delay: Duration(milliseconds: 30 * (index % 12)),
-          duration: 300.ms,
-        );
+              item: item,
+              isInCart: isInCart,
+              onTap: () {
+                if (item.hasVariants && item.variants.isNotEmpty) {
+                  setState(() => _selectedItem = item);
+                } else {
+                  cartNotifier.addItem(item, null);
+                }
+              },
+            )
+            .animate()
+            .fadeIn(delay: (20 * index).ms)
+            .scale(begin: const Offset(0.9, 0.9));
       },
     );
   }
 
-  void _handleItemTap(
-    Item item,
-    List<ItemGroup> groups,
+  // ─── Phase 2: Variants Grid for selected item group ─────
+  Widget _buildDrillDownVariants(
+    Item master,
+    List<CartItem> cart,
     CartNotifier cartNotifier,
+    bool isDark,
+    bool isTablet,
   ) {
-    // Find item's group
-    final group = groups.where((g) => g.id == item.itemGroupId).firstOrNull;
+    final variants = master.variants.where((v) {
+      return _searchQuery.isEmpty ||
+          v.variantName.toLowerCase().contains(_searchQuery.toLowerCase());
+    }).toList();
 
-    if (group == null || group.isDirect) {
-      // Direct — just add to cart
-      cartNotifier.addItem(item);
-      return;
-    }
+    if (variants.isEmpty) return _buildEmptyState(isDark);
 
-    // Grouped — show variant picker
-    if (group.isGrouped && group.showSeparateItems) {
-      // Show bottom sheet with variants
-      _showVariantPicker(group, cartNotifier);
-    } else {
-      // Merged (single button billing)
-      cartNotifier.addItem(item);
-    }
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: isTablet ? 5 : 4,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 0.75,
+      ),
+      itemCount: variants.length,
+      itemBuilder: (context, index) {
+        final v = variants[index];
+        final cartItem = cart.firstWhere(
+          (ci) => ci.item.id == master.id && ci.variant?.id == v.id,
+          orElse: () => CartItem(item: master, variant: v, qty: 0),
+        );
+
+        return SimpleVariantTile(
+              name: v.variantName,
+              price: v.baseRate,
+              foodType: master.foodType,
+              imageUrl: v.imageUrl ?? master.imageUrl,
+              cartCount: cartItem.qty,
+              isAvailable: v.isActive,
+              onTap: () => cartNotifier.addItem(master, v),
+            )
+            .animate()
+            .fadeIn(delay: (20 * index).ms)
+            .scale(begin: const Offset(0.9, 0.9));
+      },
+    );
   }
 
-  void _showVariantPicker(ItemGroup group, CartNotifier cartNotifier) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  // ─── VARIANT GRID (Consolidated All & Category view) ────
+  Widget _buildVariantGrid(
+    List<Item> masterItems,
+    List<CartItem> cart,
+    CartNotifier cartNotifier,
+    bool isDark,
+    bool isTablet,
+  ) {
+    final isAllMode = _selectedSection == null;
 
-    showModalBottomSheet(
-      context: context,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              group.groupName,
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-              ),
+    // Flatten items + variants based on selection
+    final List<Map<String, dynamic>> flatList = [];
+
+    final itemsToFlatten = isAllMode
+        ? masterItems
+        : masterItems.where((i) => i.sectionLabel == _selectedSection).toList();
+
+    for (final item in itemsToFlatten) {
+      if (!item.hasVariants || item.variants.isEmpty) {
+        flatList.add({'master': item, 'variant': null});
+      } else {
+        for (final v in item.variants) {
+          flatList.add({'master': item, 'variant': v});
+        }
+      }
+    }
+
+    // Filter by search
+    final filteredList = flatList.where((entry) {
+      final master = entry['master'] as Item;
+      final variant = entry['variant'] as ItemVariant?;
+      final fullName = variant != null
+          ? '${master.itemName} ${variant.variantName}'
+          : master.itemName;
+      return _searchQuery.isEmpty ||
+          fullName.toLowerCase().contains(_searchQuery.toLowerCase());
+    }).toList();
+
+    if (filteredList.isEmpty) return _buildEmptyState(isDark);
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: isTablet ? 5 : 4,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 0.75, // Taller to accommodate reduced width
+      ),
+      itemCount: filteredList.length,
+      itemBuilder: (context, index) {
+        final entry = filteredList[index];
+        final master = entry['master'] as Item;
+        final variant = entry['variant'] as ItemVariant?;
+
+        final cartItem = cart.firstWhere(
+          (ci) => ci.item.id == master.id && ci.variant?.id == variant?.id,
+          orElse: () => CartItem(item: master, variant: variant, qty: 0),
+        );
+
+        final displayName = variant?.variantName ?? master.itemName;
+
+        return SimpleVariantTile(
+              name: displayName,
+              price: variant?.baseRate ?? master.baseRate,
+              foodType: master.foodType,
+              imageUrl: variant?.imageUrl ?? master.imageUrl,
+              cartCount: cartItem.qty,
+              isAvailable: variant?.isActive ?? master.isActive,
+              onTap: () => cartNotifier.addItem(master, variant),
+            )
+            .animate()
+            .fadeIn(delay: (20 * index).ms)
+            .scale(begin: const Offset(0.9, 0.9));
+      },
+    );
+  }
+
+  Widget _buildEmptyState(bool isDark) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.restaurant_menu_rounded,
+            size: 48,
+            color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No items found',
+            style: GoogleFonts.inter(
+              fontSize: 15,
+              color: isDark
+                  ? AppColors.textWhiteMuted
+                  : AppColors.textDarkMuted,
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Select a variant',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: isDark
-                    ? AppColors.textWhiteMuted
-                    : AppColors.textDarkMuted,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ...group.items
-                .where((i) => i.isAvailable)
-                .map(
-                  (item) => ListTile(
-                    title: Text(item.itemName),
-                    trailing: Text(
-                      '₹${item.rate.toStringAsFixed(0)}',
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? AppColors.primaryAmber
-                            : AppColors.primaryOrange,
-                      ),
-                    ),
-                    onTap: () {
-                      cartNotifier.addItem(item);
-                      Navigator.pop(context);
-                    },
-                  ),
-                ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -505,9 +943,12 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                     final ci = cart[index];
                     return CartItemRow(
                       cartItem: ci,
-                      onIncrement: () => cartNotifier.incrementQty(ci.item.id),
-                      onDecrement: () => cartNotifier.decrementQty(ci.item.id),
-                      onRemove: () => cartNotifier.removeItem(ci.item.id),
+                      onIncrement: () =>
+                          cartNotifier.incrementQty(ci.item.id, ci.variant?.id),
+                      onDecrement: () =>
+                          cartNotifier.decrementQty(ci.item.id, ci.variant?.id),
+                      onRemove: () =>
+                          cartNotifier.removeItem(ci.item.id, ci.variant?.id),
                     );
                   },
                 ),
@@ -729,7 +1170,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   }
 
   // ─── MOBILE BILLING BAR ───────────────────────────────-
-  Widget _buildMobileBillingBar(List<CartItem> cart, bool isDark) {
+  Widget _buildMobileOrderPanel(List<CartItem> cart, bool isDark) {
     final total = cart.fold<double>(0, (sum, ci) => sum + ci.total);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),

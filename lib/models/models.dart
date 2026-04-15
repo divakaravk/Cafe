@@ -6,6 +6,7 @@ class Company {
   final String companyName;
   final bool hasGst;
   final bool hasTableManagement;
+  final bool hasItemVariants;
   final bool isActive;
   final DateTime? createdAt;
 
@@ -15,6 +16,7 @@ class Company {
     required this.companyName,
     this.hasGst = false,
     this.hasTableManagement = true,
+    this.hasItemVariants = false,
     this.isActive = true,
     this.createdAt,
   });
@@ -25,6 +27,7 @@ class Company {
     companyName: json['company_name'] as String,
     hasGst: json['has_gst'] as bool? ?? false,
     hasTableManagement: json['has_table_management'] as bool? ?? true,
+    hasItemVariants: json['has_item_variants'] as bool? ?? false,
     isActive: json['is_active'] as bool? ?? true,
     createdAt: json['created_at'] != null
         ? DateTime.parse(json['created_at'] as String)
@@ -36,6 +39,7 @@ class Company {
     'company_name': companyName,
     'has_gst': hasGst,
     'has_table_management': hasTableManagement,
+    'has_item_variants': hasItemVariants,
     'is_active': isActive,
   };
 }
@@ -47,8 +51,11 @@ class UserProfile {
   final String companyId;
   final String role;
   final String fullName;
+  final String employeeCode;
   final String? username;
   final String? phone;
+  final String? email;
+  final String? avatarUrl;
   final bool isActive;
   final DateTime? createdAt;
 
@@ -57,95 +64,158 @@ class UserProfile {
     required this.companyId,
     required this.role,
     required this.fullName,
+    required this.employeeCode,
     this.username,
     this.phone,
+    this.email,
+    this.avatarUrl,
     this.isActive = true,
     this.createdAt,
   });
 
-  bool get isAdmin => role.toUpperCase() == 'ADMIN';
-  bool get isManager => role.toUpperCase() == 'MANAGER';
-  bool get isCashier => role.toUpperCase() == 'CASHIER';
-  bool get isWaiter => role.toUpperCase() == 'WAITER';
-  bool get isKitchen => role.toUpperCase() == 'KITCHEN';
+  bool get isAdmin => role.toLowerCase() == 'admin';
+  bool get isManager => role.toLowerCase() == 'manager';
+  bool get isCashier => role.toLowerCase() == 'cashier';
+  bool get isWaiter => role.toLowerCase() == 'waiter';
+  bool get isKitchen => role.toLowerCase() == 'kitchen';
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
     id: json['id'] as String,
     companyId: json['company_id'] as String,
-    role: json['role'] as String? ?? 'CASHIER',
+    role: json['role'] as String? ?? 'cashier',
     fullName: json['full_name'] as String? ?? '',
+    employeeCode: json['employee_code'] as String? ?? '',
     username: json['username'] as String?,
     phone: json['phone'] as String?,
+    email: json['email'] as String?,
+    avatarUrl: json['avatar_url'] as String?,
     isActive: json['is_active'] as bool? ?? true,
     createdAt: json['created_at'] != null
         ? DateTime.parse(json['created_at'] as String)
         : null,
   );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'company_id': companyId,
+    'role': role.toLowerCase(),
+    'full_name': fullName,
+    'employee_code': employeeCode,
+    'username': username,
+    'phone': phone,
+    'email': email,
+    'avatar_url': avatarUrl,
+    'is_active': isActive,
+  };
 }
 
-/// Item group model
-class ItemGroup {
-  final String id;
-  final String companyId;
-  final String groupName;
-  final String displayType; // DIRECT or GROUPED
-  final bool showSeparateItems;
-  final List<Item> items;
+/// Permissions for a User
+// 2b. USER_PERMISSION
+class UserPermission {
+  final String userId;
+  final bool canViewDashboard;
+  final bool canCreateBill;
+  final bool canEditBill;
+  final bool canCancelBill;
+  final bool canApplyDiscount;
+  final bool canManageItems;
+  final bool canManageTables;
+  final bool canViewReports;
+  final bool canManageUsers;
+  final bool canManageSettings;
+  final bool canVoidItems;
 
-  ItemGroup({
-    required this.id,
-    required this.companyId,
-    required this.groupName,
-    this.displayType = 'DIRECT',
-    this.showSeparateItems = false,
-    this.items = const [],
+  UserPermission({
+    required this.userId,
+    this.canViewDashboard = false,
+    this.canCreateBill = true,
+    this.canEditBill = false,
+    this.canCancelBill = false,
+    this.canApplyDiscount = false,
+    this.canManageItems = false,
+    this.canManageTables = false,
+    this.canViewReports = false,
+    this.canManageUsers = false,
+    this.canManageSettings = false,
+    this.canVoidItems = false,
   });
 
-  bool get isDirect => displayType == 'DIRECT';
-  bool get isGrouped => displayType == 'GROUPED';
-
-  factory ItemGroup.fromJson(Map<String, dynamic> json) => ItemGroup(
-    id: json['id'] as String,
-    companyId: json['company_id'] as String,
-    groupName: json['group_name'] as String,
-    displayType: json['display_type'] as String? ?? 'DIRECT',
-    showSeparateItems: json['show_separate_items'] as bool? ?? false,
-    items: (json['items'] as List<dynamic>?)
-        ?.map((e) => Item.fromJson(e as Map<String, dynamic>))
-        .toList() ?? [],
+  factory UserPermission.fromJson(Map<String, dynamic> json) => UserPermission(
+    userId: json['user_id'] as String,
+    canViewDashboard: json['can_view_dashboard'] as bool? ?? false,
+    canCreateBill: json['can_create_bill'] as bool? ?? true,
+    canEditBill: json['can_edit_bill'] as bool? ?? false,
+    canCancelBill: json['can_cancel_bill'] as bool? ?? false,
+    canApplyDiscount: json['can_apply_discount'] as bool? ?? false,
+    canManageItems: json['can_manage_items'] as bool? ?? false,
+    canManageTables: json['can_manage_tables'] as bool? ?? false,
+    canViewReports: json['can_view_reports'] as bool? ?? false,
+    canManageUsers: json['can_manage_users'] as bool? ?? false,
+    canManageSettings: json['can_manage_settings'] as bool? ?? false,
+    canVoidItems: json['can_void_items'] as bool? ?? false,
   );
 
   Map<String, dynamic> toJson() => {
-    'company_id': companyId,
-    'group_name': groupName,
-    'display_type': displayType,
-    'show_separate_items': showSeparateItems,
+    'user_id': userId,
+    'can_view_dashboard': canViewDashboard,
+    'can_create_bill': canCreateBill,
+    'can_edit_bill': canEditBill,
+    'can_cancel_bill': canCancelBill,
+    'can_apply_discount': canApplyDiscount,
+    'can_manage_items': canManageItems,
+    'can_manage_tables': canManageTables,
+    'can_view_reports': canViewReports,
+    'can_manage_users': canManageUsers,
+    'can_manage_settings': canManageSettings,
+    'can_void_items': canVoidItems,
   };
 }
 
 /// Menu item model
-// 3. ITEM_MASTER
+// 4. ITEM_MASTER
 class Item {
   final String id;
   final String companyId;
-  final String? itemGroupId;
-  final String itemName;
-  final double baseRate;
-  final bool isTaxable;
   final String? hsnId;
+  final String itemCode;
+  final String itemName;
+  final String? description;
+  final String unitOfMeasure;
+  final double baseRate;
+  final bool hasVariants;
+  final bool isTaxable;
   final bool isActive;
+  final String? imageUrl;
+  final int displayOrder;
+  final double inclusiveRate;
+  final bool isRateInclusive;
+  final String? sectionLabel;
+  final String? colorTag;
+  final String foodType; // 'veg', 'egg', 'non-veg'
   final DateTime? createdAt;
+  final List<ItemVariant> variants;
 
   Item({
     required this.id,
     required this.companyId,
-    this.itemGroupId,
-    required this.itemName,
-    required this.baseRate,
-    this.isTaxable = false,
     this.hsnId,
+    required this.itemCode,
+    required this.itemName,
+    this.description,
+    this.unitOfMeasure = 'PCS',
+    required this.baseRate,
+    this.hasVariants = false,
+    this.isTaxable = true,
     this.isActive = true,
+    this.imageUrl,
+    this.displayOrder = 0,
+    this.inclusiveRate = 0,
+    this.isRateInclusive = false,
+    this.sectionLabel,
+    this.colorTag,
+    this.foodType = 'veg',
     this.createdAt,
+    this.variants = const [],
   });
 
   // Compatibility getters
@@ -156,25 +226,114 @@ class Item {
   factory Item.fromJson(Map<String, dynamic> json) => Item(
     id: json['id'] as String,
     companyId: json['company_id'] as String,
-    itemGroupId: json['item_group_id'] as String?,
-    itemName: json['item_name'] as String,
-    baseRate: (json['base_rate'] as num).toDouble(),
-    isTaxable: json['is_taxable'] as bool? ?? false,
     hsnId: json['hsn_id'] as String?,
+    itemCode: json['item_code'] as String? ?? '',
+    itemName: json['item_name'] as String,
+    description: json['description'] as String?,
+    unitOfMeasure: json['unit_of_measure'] as String? ?? 'PCS',
+    baseRate: (json['base_rate'] as num?)?.toDouble() ?? 0,
+    hasVariants: json['has_variants'] as bool? ?? false,
+    isTaxable: json['is_taxable'] as bool? ?? true,
     isActive: json['is_active'] as bool? ?? true,
+    imageUrl: json['image_url'] as String?,
+    displayOrder: json['display_order'] as int? ?? 0,
+    inclusiveRate: (json['inclusive_rate'] as num?)?.toDouble() ?? 0,
+    isRateInclusive: json['is_rate_inclusive'] as bool? ?? false,
+    sectionLabel: json['section_label'] as String?,
+    colorTag: json['color_tag'] as String?,
+    foodType: json['food_type'] as String? ?? 'veg',
     createdAt: json['created_at'] != null
         ? DateTime.parse(json['created_at'] as String)
         : null,
+    variants:
+        (json['item_variant'] as List<dynamic>?)
+            ?.map((e) => ItemVariant.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [],
   );
 
   Map<String, dynamic> toJson() => {
+    'id': id,
     'company_id': companyId,
-    'item_group_id': itemGroupId,
-    'item_name': itemName,
-    'base_rate': baseRate,
-    'is_taxable': isTaxable,
     'hsn_id': hsnId,
+    'item_code': itemCode,
+    'item_name': itemName,
+    'description': description,
+    'unit_of_measure': unitOfMeasure,
+    'base_rate': baseRate,
+    'has_variants': hasVariants,
+    'is_taxable': isTaxable,
     'is_active': isActive,
+    'image_url': imageUrl,
+    'display_order': displayOrder,
+    'inclusive_rate': inclusiveRate,
+    'is_rate_inclusive': isRateInclusive,
+    'section_label': sectionLabel,
+    'color_tag': colorTag,
+    'food_type': foodType,
+  };
+}
+
+/// Item variant model
+class ItemVariant {
+  final String id;
+  final String itemId;
+  final String variantName;
+  final double baseRate;
+  final bool isActive;
+  final String? imageUrl;
+  final String? hsnId;
+  final double inclusiveRate;
+  final bool isRateInclusive;
+  final String? description;
+  final int displayOrder;
+  final bool isAvailable;
+
+  ItemVariant({
+    required this.id,
+    required this.itemId,
+    required this.variantName,
+    required this.baseRate,
+    this.isActive = true,
+    this.imageUrl,
+    this.hsnId,
+    this.inclusiveRate = 0,
+    this.isRateInclusive = false,
+    this.description,
+    this.displayOrder = 0,
+    this.isAvailable = true,
+  });
+
+  double get rate => baseRate;
+
+  factory ItemVariant.fromJson(Map<String, dynamic> json) => ItemVariant(
+    id: json['id'] as String,
+    itemId: json['item_id'] as String,
+    variantName: json['variant_name'] as String,
+    baseRate: (json['base_rate'] as num?)?.toDouble() ?? 0,
+    isActive: json['is_active'] as bool? ?? true,
+    imageUrl: json['image_url'] as String?,
+    hsnId: json['hsn_id'] as String?,
+    inclusiveRate: (json['inclusive_rate'] as num?)?.toDouble() ?? 0,
+    isRateInclusive: json['is_rate_inclusive'] as bool? ?? false,
+    description: json['description'] as String?,
+    displayOrder: json['display_order'] as int? ?? 0,
+    isAvailable: json['is_available'] as bool? ?? true,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'item_id': itemId,
+    'variant_name': variantName,
+    'base_rate': baseRate,
+    'is_active': isActive,
+    'image_url': imageUrl,
+    'hsn_id': hsnId,
+    'inclusive_rate': inclusiveRate,
+    'is_rate_inclusive': isRateInclusive,
+    'description': description,
+    'display_order': displayOrder,
+    'is_available': isAvailable,
   };
 }
 
@@ -199,8 +358,9 @@ class CafeTable {
 
   // Compatibility getters
   String get tableName => tableNumber;
-  String get status => 'FREE'; // Placeholder: V2 uses TABLE_SESSION to determine this
-  bool get isFree => true;     // Placeholder
+  String get status =>
+      'FREE'; // Placeholder: V2 uses TABLE_SESSION to determine this
+  bool get isFree => true; // Placeholder
   bool get isOccupied => false; // Placeholder
 
   factory CafeTable.fromJson(Map<String, dynamic> json) => CafeTable(
@@ -241,9 +401,11 @@ class Order {
     tableId: json['table_id'] as String?,
     orderType: json['order_type'] as String? ?? 'DINE_IN',
     status: json['status'] as String? ?? 'OPEN',
-    items: (json['order_items'] as List<dynamic>?)
-        ?.map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
-        .toList() ?? [],
+    items:
+        (json['order_items'] as List<dynamic>?)
+            ?.map((e) => OrderItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [],
     createdAt: json['created_at'] != null
         ? DateTime.parse(json['created_at'] as String)
         : null,
@@ -276,8 +438,13 @@ class OrderItem {
     id: json['id'] as String,
     orderId: json['order_id'] as String,
     itemId: json['item_id'] as String,
-    itemName: json['item_name'] ?? (json['items'] != null ? json['items']['item_name'] : '') as String,
-    rate: (json['rate'] ?? (json['items'] != null ? json['items']['rate'] : 0) as num).toDouble(),
+    itemName:
+        json['item_name'] ??
+        (json['items'] != null ? json['items']['item_name'] : '') as String,
+    rate:
+        (json['rate'] ??
+                (json['items'] != null ? json['items']['rate'] : 0) as num)
+            .toDouble(),
     qty: json['qty'] as int? ?? 1,
     notes: json['notes'] as String?,
   );
@@ -324,9 +491,11 @@ class Bill {
     totalAmount: (json['total_amount'] as num).toDouble(),
     paymentMode: json['payment_mode'] as String? ?? 'CASH',
     isVoided: json['is_voided'] as bool? ?? false,
-    items: (json['bill_items'] as List<dynamic>?)
-        ?.map((e) => BillItem.fromJson(e as Map<String, dynamic>))
-        .toList() ?? [],
+    items:
+        (json['bill_items'] as List<dynamic>?)
+            ?.map((e) => BillItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [],
     createdAt: json['created_at'] != null
         ? DateTime.parse(json['created_at'] as String)
         : null,
@@ -360,7 +529,9 @@ class BillItem {
     id: json['id'] as String,
     billId: json['bill_id'] as String,
     itemId: json['item_id'] as String,
-    itemName: json['item_name'] ?? (json['items'] != null ? json['items']['item_name'] : null) as String?,
+    itemName:
+        json['item_name'] ??
+        (json['items'] != null ? json['items']['item_name'] : null) as String?,
     qty: json['qty'] as int,
     rate: (json['rate'] as num).toDouble(),
     taxPercentage: (json['tax_percentage'] as num?)?.toDouble() ?? 0,
@@ -370,16 +541,13 @@ class BillItem {
 /// Cart item for the POS (local state before billing)
 class CartItem {
   final Item item;
+  final ItemVariant? variant;
   int qty;
   String? notes;
 
-  CartItem({
-    required this.item,
-    this.qty = 1,
-    this.notes,
-  });
+  CartItem({required this.item, this.variant, this.qty = 1, this.notes});
 
-  double get total => item.baseRate * qty;
-  String get itemName => item.itemName;
-  double get rate => item.baseRate;
+  double get total => rate * qty;
+  String get itemName => variant != null ? variant!.variantName : item.itemName;
+  double get rate => variant?.baseRate ?? item.baseRate;
 }
