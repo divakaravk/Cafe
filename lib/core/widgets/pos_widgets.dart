@@ -178,29 +178,47 @@ class CartItemRow extends StatelessWidget {
         child: const Icon(Icons.delete_outline, color: AppColors.error),
       ),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        margin: const EdgeInsets.symmetric(vertical: 2),
+        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
         decoration: BoxDecoration(
           color: isDark
-              ? AppColors.darkCard.withValues(alpha: 0.5)
-              : AppColors.lightCard.withValues(alpha: 0.5),
-          borderRadius: BorderRadius.circular(10),
+              ? AppColors.darkCard.withValues(alpha: 0.8)
+              : AppColors.lightCard.withValues(alpha: 0.8),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark
+                ? AppColors.darkBorder.withValues(alpha: 0.1)
+                : AppColors.lightBorder.withValues(alpha: 0.2),
+            width: 1,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Row(
           children: [
             // Variant image
             Container(
-              width: 36,
-              height: 36,
-              margin: const EdgeInsets.only(right: 10),
+              width: 44,
+              height: 44,
+              margin: const EdgeInsets.only(right: 12),
               decoration: BoxDecoration(
                 color: isDark
                     ? Colors.white.withValues(alpha: 0.06)
                     : Colors.grey.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.black.withValues(alpha: 0.05),
+                ),
               ),
               child: ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(12),
                 child: _buildCartItemImage(cartItem),
               ),
             ),
@@ -211,8 +229,9 @@ class CartItemRow extends StatelessWidget {
               child: Text(
                 cartItem.itemName,
                 style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? AppColors.textWhite : AppColors.textDark,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -221,15 +240,16 @@ class CartItemRow extends StatelessWidget {
 
             // Quantity controls
             Container(
+              padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(
                 color: isDark
-                    ? AppColors.darkBg.withValues(alpha: 0.8)
-                    : AppColors.lightBg,
-                borderRadius: BorderRadius.circular(8),
+                    ? AppColors.darkBg.withValues(alpha: 0.6)
+                    : AppColors.lightBg.withValues(alpha: 0.7),
+                borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                   color: isDark
-                      ? AppColors.darkBorder.withValues(alpha: 0.3)
-                      : AppColors.lightBorder.withValues(alpha: 0.4),
+                      ? AppColors.darkBorder.withValues(alpha: 0.2)
+                      : AppColors.lightBorder.withValues(alpha: 0.3),
                 ),
               ),
               child: Row(
@@ -816,7 +836,7 @@ class SimpleVariantTile extends StatelessWidget {
             Expanded(
               flex: 2,
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,

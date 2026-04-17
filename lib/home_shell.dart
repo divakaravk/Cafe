@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'core/theme/app_colors.dart';
 import 'core/constants/app_constants.dart';
 import 'models/models.dart';
@@ -68,7 +69,7 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
         posScreen = const ModernPosScreen();
     }
 
-    final screens = [
+    final List<Widget> screens = [
       posScreen,
       TablesScreen(companyId: widget.user.companyId),
       BillsScreen(companyId: widget.user.companyId),
@@ -84,6 +85,12 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
   Widget _buildUnifiedDrawer(BuildContext context, bool isDark) {
     return Drawer(
       backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.only(
+          topRight: Radius.circular(24),
+          bottomRight: Radius.circular(24),
+        ),
+      ),
       child: Column(
         children: [
           DrawerHeader(
@@ -231,14 +238,14 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
 
   Widget _buildDrawerSection(String title, bool isDark) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 16, 16, 8),
+      padding: const EdgeInsets.fromLTRB(24, 24, 16, 12),
       child: Text(
-        title,
+        title.toUpperCase(),
         style: GoogleFonts.inter(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
           color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
-          letterSpacing: 1.2,
+          letterSpacing: 1.5,
         ),
       ),
     );
@@ -252,30 +259,68 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
     bool isError = false,
     bool isSelected = false,
   }) {
-    return ListTile(
-      leading: Icon(
-        icon,
-        size: 20,
-        color: isError
-            ? AppColors.error
-            : (isSelected
-                ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                : (isDark ? AppColors.textWhite : AppColors.textDark)),
-      ),
-      title: Text(
-        title,
-        style: GoogleFonts.inter(
-          fontSize: 14,
-          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-          color: isError
-              ? AppColors.error
-              : (isSelected
-                  ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                  : (isDark ? AppColors.textWhite : AppColors.textDark)),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 3),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          color: isSelected
+              ? (isDark
+                    ? AppColors.primaryAmber.withValues(alpha: 0.15)
+                    : AppColors.primaryOrange.withValues(alpha: 0.1))
+              : Colors.transparent,
+          border: isSelected
+              ? Border.all(
+                  color:
+                      (isDark
+                              ? AppColors.primaryAmber
+                              : AppColors.primaryOrange)
+                          .withValues(alpha: 0.2),
+                  width: 1,
+                )
+              : null,
+        ),
+        child: ListTile(
+          leading:
+              Icon(
+                    icon,
+                    size: 20,
+                    color: isError
+                        ? AppColors.error
+                        : (isSelected
+                              ? (isDark
+                                    ? AppColors.primaryAmber
+                                    : AppColors.primaryOrange)
+                              : (isDark
+                                    ? AppColors.textWhiteMuted
+                                    : AppColors.textDarkMuted)),
+                  )
+                  .animate(target: isSelected ? 1 : 0)
+                  .shimmer(
+                    duration: 1200.ms,
+                    color: Colors.white.withValues(alpha: 0.2),
+                  ),
+          title: Text(
+            title,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+              color: isError
+                  ? AppColors.error
+                  : (isSelected
+                        ? (isDark
+                              ? AppColors.primaryAmber
+                              : AppColors.primaryOrange)
+                        : (isDark ? AppColors.textWhite : AppColors.textDark)),
+            ),
+          ),
+          dense: true,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          onTap: onTap,
         ),
       ),
-      dense: true,
-      onTap: onTap,
     );
   }
 }

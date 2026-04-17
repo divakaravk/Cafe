@@ -144,7 +144,7 @@ class SupabaseService {
   ) async {
     final res = await client
         .from('item_master')
-        .select('*, item_variant(*)')
+        .select('*, company_hsn(*), item_variant(*, company_hsn(*))')
         .eq('company_id', companyId)
         .order('display_order');
     return List<Map<String, dynamic>>.from(res);
@@ -182,7 +182,7 @@ class SupabaseService {
   ) async {
     final res = await client
         .from('item_master')
-        .select('*, item_variant(*)')
+        .select('*, company_hsn(*), item_variant(*, company_hsn(*))')
         .eq('company_id', companyId)
         .order('item_name');
     return List<Map<String, dynamic>>.from(res);
@@ -304,47 +304,103 @@ class SupabaseService {
   // ─── BILLS (BILL_MASTER) ─────────────────────────────
   static Future<Map<String, dynamic>> createBill({
     required String companyId,
+    required String billedBy,
     String? tableSessionId,
     required double subtotal,
     double taxAmount = 0,
     double discountAmount = 0,
+    String? discountType,
     required double totalAmount,
     String paymentMode = 'cash',
+    String billType = 'dine_in',
     required List<Map<String, dynamic>> billItems,
   }) async {
-    // Create bill
+    // Generate bill number
+    final now = DateTime.now();
+    final billNumber = 'BL-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${now.hour}${now.minute}${now.second}';
+
+    double totalCgst = 0;
+    double totalSgst = 0;
+    double totalIgst = 0;
+
+    // Prepare bill items and calculate taxes
+    final itemsToInsert = billItems.map((bi) {
+      final qty = (bi['qty'] as num).toDouble();
+      final rate = (bi['rate'] as num).toDouble();
+      final gstRate = (bi['gst_rate'] as num?)?.toDouble() ?? 0;
+      final isTaxable = bi['is_taxable'] as bool? ?? true;
+      
+      double cgst = 0;
+      double sgst = 0;
+      double igst = 0;
+
+      if (isTaxable && gstRate > 0) {
+        // Simple calculation: GST is split 50/50 between CGST and SGST for local sales
+        // IGST would be the full amount for inter-state (not handled specifically here, default to CGST/SGST)
+        final itemTax = (qty * rate) * (gstRate / 100);
+        cgst = itemTax / 2;
+        sgst = itemTax / 2;
+        
+        totalCgst += cgst;
+        totalSgst += sgst;
+      }
+
+      return {
+        'item_id': bi['item_id'],
+        'variant_id': bi['variant_id'],
+        'item_name_snapshot': bi['item_name'] ?? '',
+        'rate_snapshot': rate,
+        'qty': qty,
+        'gross_amount': qty * rate,
+        'discount_amount': bi['discount_item'] ?? 0,
+        'hsn_code_snapshot': bi['hsn_code'],
+        'gst_rate_snapshot': gstRate,
+        'cgst_amount': cgst,
+        'sgst_amount': sgst,
+        'igst_amount': igst,
+        'net_amount': (qty * rate) + cgst + sgst + igst,
+        'notes': bi['notes'],
+      };
+    }).toList();
+
+    // Create bill master
     final bill = await client
         .from('bill_master')
         .insert({
           'company_id': companyId,
+          'billed_by': billedBy,
           'table_session_id': tableSessionId,
+          'bill_number': billNumber,
+          'bill_type': billType,
           'subtotal': subtotal,
-          'taxable_amount': subtotal,
           'discount_amount': discountAmount,
+          'discount_type': discountType,
+          'taxable_amount': subtotal,
+          'cgst_amount': totalCgst,
+          'sgst_amount': totalSgst,
+          'igst_amount': totalIgst,
           'total_amount': totalAmount,
-          'payment_mode': paymentMode,
-          'bill_type': 'dine_in',
-          'bill_number': 'AUTO', // Should be generated
+          'payment_mode': paymentMode.toLowerCase(),
+          'status': 'paid', // Defaulting to paid for POS checkout
         })
         .select()
         .single();
 
     // Insert bill items
     final billId = bill['id'];
-    final items = billItems
-        .map(
-          (bi) => {
-            'bill_id': billId,
-            'item_id': bi['item_id'],
-            'qty': bi['qty'],
-            'rate_snapshot': bi['rate'],
-            'item_name_snapshot': bi['item_name'] ?? '',
-            'gross_amount': bi['rate'] * bi['qty'],
-            'net_amount': bi['rate'] * bi['qty'],
-          },
-        )
-        .toList();
-    await client.from('bill_item').insert(items);
+    for (var item in itemsToInsert) {
+      item['bill_id'] = billId;
+    }
+    
+    await client.from('bill_item').insert(itemsToInsert);
+
+    // If table session exists, update it
+    if (tableSessionId != null) {
+      await client
+          .from('table_session')
+          .update({'status': 'billed', 'closed_at': now.toIso8601String()})
+          .eq('id', tableSessionId);
+    }
 
     return bill;
   }

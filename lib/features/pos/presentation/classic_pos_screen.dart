@@ -32,8 +32,8 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final size = MediaQuery.of(context).size;
     final isTablet = size.width > 800;
-    final cart = ref.watch(cartProvider);
-    final cartNotifier = ref.read(cartProvider.notifier);
+    final cart = ref.watch(cartProvider(null));
+    final cartNotifier = ref.read(cartProvider(null).notifier);
     final user = ref.watch(authStateProvider).value;
 
     if (user == null) return const SizedBox.shrink();
@@ -465,7 +465,7 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
               const Spacer(),
               if (cart.isNotEmpty)
                 TextButton(
-                  onPressed: () => cartNotifier.clear(),
+                  onPressed: () => ref.read(cartProvider(null).notifier).clear(),
                   child: Text(
                     'Clear',
                     style: GoogleFonts.inter(
@@ -498,9 +498,9 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                   children: cart.map((ci) {
                     return CartItemRow(
                       cartItem: ci,
-                      onIncrement: () => cartNotifier.incrementQty(ci.item.id),
-                      onDecrement: () => cartNotifier.decrementQty(ci.item.id),
-                      onRemove: () => cartNotifier.removeItem(ci.item.id),
+                      onIncrement: () => ref.read(cartProvider(null).notifier).incrementQty(ci.item.id),
+                      onDecrement: () => ref.read(cartProvider(null).notifier).decrementQty(ci.item.id),
+                      onRemove: () => ref.read(cartProvider(null).notifier).removeItem(ci.item.id),
                     );
                   }).toList(),
                 ),
@@ -636,6 +636,7 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
     try {
       await SupabaseService.createBill(
         companyId: user.companyId,
+        billedBy: user.id,
         subtotal: subtotal,
         discountAmount: discountAmount,
         totalAmount: total,
@@ -644,14 +645,20 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
             .map(
               (ci) => {
                 'item_id': ci.item.id,
+                'variant_id': ci.variant?.id,
                 'qty': ci.qty,
                 'rate': ci.rate,
-                'tax_percentage': 0,
+                'item_name': ci.itemName,
+                'hsn_code': ci.variant?.hsnCode ?? ci.item.hsnCode,
+                'gst_rate': ci.variant?.gstRate ?? ci.item.gstRate,
+                'is_taxable': ci.item.isTaxable,
+                'discount_item': 0,
+                'notes': ci.notes,
               },
             )
             .toList(),
       );
-      ref.read(cartProvider.notifier).clear();
+      ref.read(cartProvider(null).notifier).clear();
       ref.read(discountProvider.notifier).reset();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

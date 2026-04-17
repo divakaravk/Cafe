@@ -194,6 +194,11 @@ class Item {
   final String foodType; // 'veg', 'egg', 'non-veg'
   final DateTime? createdAt;
   final List<ItemVariant> variants;
+  final String? hsnCode;
+  final double gstRate;
+  final double cgstRate;
+  final double sgstRate;
+  final double igstRate;
 
   Item({
     required this.id,
@@ -216,6 +221,11 @@ class Item {
     this.foodType = 'veg',
     this.createdAt,
     this.variants = const [],
+    this.hsnCode,
+    this.gstRate = 0,
+    this.cgstRate = 0,
+    this.sgstRate = 0,
+    this.igstRate = 0,
   });
 
   // Compatibility getters
@@ -250,6 +260,11 @@ class Item {
             ?.map((e) => ItemVariant.fromJson(e as Map<String, dynamic>))
             .toList() ??
         [],
+    hsnCode: json['company_hsn'] != null ? json['company_hsn']['hsn_code'] as String? : null,
+    gstRate: json['company_hsn'] != null ? (json['company_hsn']['gst_rate'] as num?)?.toDouble() ?? 0 : 0,
+    cgstRate: json['company_hsn'] != null ? (json['company_hsn']['cgst_rate'] as num?)?.toDouble() ?? 0 : 0,
+    sgstRate: json['company_hsn'] != null ? (json['company_hsn']['sgst_rate'] as num?)?.toDouble() ?? 0 : 0,
+    igstRate: json['company_hsn'] != null ? (json['company_hsn']['igst_rate'] as num?)?.toDouble() ?? 0 : 0,
   );
 
   Map<String, dynamic> toJson() => {
@@ -274,7 +289,6 @@ class Item {
   };
 }
 
-/// Item variant model
 class ItemVariant {
   final String id;
   final String itemId;
@@ -288,6 +302,11 @@ class ItemVariant {
   final String? description;
   final int displayOrder;
   final bool isAvailable;
+  final String? hsnCode;
+  final double gstRate;
+  final double cgstRate;
+  final double sgstRate;
+  final double igstRate;
 
   ItemVariant({
     required this.id,
@@ -302,6 +321,11 @@ class ItemVariant {
     this.description,
     this.displayOrder = 0,
     this.isAvailable = true,
+    this.hsnCode,
+    this.gstRate = 0,
+    this.cgstRate = 0,
+    this.sgstRate = 0,
+    this.igstRate = 0,
   });
 
   double get rate => baseRate;
@@ -319,6 +343,11 @@ class ItemVariant {
     description: json['description'] as String?,
     displayOrder: json['display_order'] as int? ?? 0,
     isAvailable: json['is_available'] as bool? ?? true,
+    hsnCode: json['company_hsn'] != null ? json['company_hsn']['hsn_code'] as String? : null,
+    gstRate: json['company_hsn'] != null ? (json['company_hsn']['gst_rate'] as num?)?.toDouble() ?? 0 : 0,
+    cgstRate: json['company_hsn'] != null ? (json['company_hsn']['cgst_rate'] as num?)?.toDouble() ?? 0 : 0,
+    sgstRate: json['company_hsn'] != null ? (json['company_hsn']['sgst_rate'] as num?)?.toDouble() ?? 0 : 0,
+    igstRate: json['company_hsn'] != null ? (json['company_hsn']['igst_rate'] as num?)?.toDouble() ?? 0 : 0,
   );
 
   Map<String, dynamic> toJson() => {
@@ -548,6 +577,9 @@ class CartItem {
   CartItem({required this.item, this.variant, this.qty = 1, this.notes});
 
   double get total => rate * qty;
-  String get itemName => variant != null ? variant!.variantName : item.itemName;
+  String get itemName =>
+      (variant != null && variant!.variantName.toLowerCase() != 'default')
+          ? variant!.variantName
+          : item.itemName;
   double get rate => variant?.baseRate ?? item.baseRate;
 }

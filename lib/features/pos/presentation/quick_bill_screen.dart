@@ -17,8 +17,8 @@ class QuickBillScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final cart = ref.watch(cartProvider);
-    final cartNotifier = ref.read(cartProvider.notifier);
+    final cart = ref.watch(cartProvider(null));
+    final cartNotifier = ref.read(cartProvider(null).notifier);
     final authState = ref.watch(authStateProvider);
     final user = authState.value;
 
@@ -216,7 +216,7 @@ class QuickBillScreen extends ConsumerWidget {
                                       size: 14,
                                     ),
                                     onDeleted: () =>
-                                        cartNotifier.removeItem(ci.item.id),
+                                        ref.read(cartProvider(null).notifier).removeItem(ci.item.id),
                                     visualDensity: VisualDensity.compact,
                                   ),
                                 )
@@ -224,7 +224,7 @@ class QuickBillScreen extends ConsumerWidget {
                           ),
                         ),
                         TextButton(
-                          onPressed: () => cartNotifier.clear(),
+                          onPressed: () => ref.read(cartProvider(null).notifier).clear(),
                           child: Text(
                             'Clear',
                             style: GoogleFonts.inter(
@@ -309,22 +309,30 @@ class QuickBillScreen extends ConsumerWidget {
     try {
       await SupabaseService.createBill(
         companyId: user.companyId,
+        billedBy: user.id,
         subtotal: subtotal,
         discountAmount: discountAmount,
+        discountType: 'percent',
         totalAmount: total,
         paymentMode: mode,
         billItems: cart
             .map(
               (ci) => {
                 'item_id': ci.item.id,
+                'variant_id': ci.variant?.id,
                 'qty': ci.qty,
                 'rate': ci.rate,
-                'tax_percentage': 0,
+                'item_name': ci.itemName,
+                'hsn_code': ci.variant?.hsnCode ?? ci.item.hsnCode,
+                'gst_rate': ci.variant?.gstRate ?? ci.item.gstRate,
+                'is_taxable': ci.item.isTaxable,
+                'discount_item': 0,
+                'notes': ci.notes,
               },
             )
             .toList(),
       );
-      ref.read(cartProvider.notifier).clear();
+      ref.read(cartProvider(null).notifier).clear();
       ref.read(discountProvider.notifier).reset();
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -103,11 +103,15 @@ final tablesProvider = FutureProvider.family<List<CafeTable>, String>((
 });
 
 // ─── CART ────────────────────────────────────────────────
-final cartProvider = NotifierProvider<CartNotifier, List<CartItem>>(
-  CartNotifier.new,
-);
+final cartProvider =
+    NotifierProvider.family<CartNotifier, List<CartItem>, String?>(
+      CartNotifier.new,
+    );
 
 class CartNotifier extends Notifier<List<CartItem>> {
+  final String? tableId;
+  CartNotifier(this.tableId);
+
   @override
   List<CartItem> build() => [];
 

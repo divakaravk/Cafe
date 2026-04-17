@@ -26,7 +26,6 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   Item? _selectedItem;
   String _searchQuery = '';
   final _searchController = TextEditingController();
-  bool _showBillingPanel = true;
   bool _isGroupsOn = true;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
@@ -65,8 +64,8 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final size = MediaQuery.of(context).size;
     final isTablet = size.width > 800;
-    final cart = ref.watch(cartProvider);
-    final cartNotifier = ref.read(cartProvider.notifier);
+    final cart = ref.watch(cartProvider(null));
+    final cartNotifier = ref.read(cartProvider(null).notifier);
     final authState = ref.watch(authStateProvider);
     final user = authState.value;
 
@@ -76,94 +75,65 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
     return Scaffold(
       key: _scaffoldKey,
+      endDrawer: Drawer(
+        width: isTablet ? 400 : size.width * 0.85,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(24),
+            bottomLeft: Radius.circular(24),
+          ),
+        ),
+        child: _buildBillingPanel(cart, cartNotifier, isDark, user),
+      ),
       body: Stack(
         children: [
-          Row(
+          Column(
             children: [
-              // ─── LEFT: Items Panel ──────────────────────────
+              // Top Bar
+              _buildTopBar(isDark, user),
+              // Search
+              _buildSearchBar(isDark),
+              // Navigation Bar - section chips (Groups OFF) or item group chips (Groups ON)
+              itemGroupsAsync.when(
+                data: (items) => _isGroupsOn
+                    ? _buildItemGroupNav(items, isDark)
+                    : const SizedBox.shrink(),
+                loading: () => _isGroupsOn
+                    ? const SizedBox(height: 56)
+                    : const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
+              // Menu area
               Expanded(
-                flex: isTablet ? 3 : 2,
-                child: Column(
-                  children: [
-                    // Top Bar
-                    _buildTopBar(isDark, user),
-                    // Search
-                    _buildSearchBar(isDark),
-                    // Navigation Bar - section chips (Groups OFF) or item group chips (Groups ON)
-                    itemGroupsAsync.when(
-                      data: (items) => _isGroupsOn
-                          ? _buildItemGroupNav(items, isDark)
-                          : const SizedBox.shrink(),
-                      loading: () => _isGroupsOn
-                          ? const SizedBox(height: 56)
-                          : const SizedBox.shrink(),
-                      error: (_, __) => const SizedBox.shrink(),
-                    ),
-                    // Menu area
-                    Expanded(
-                      child: itemGroupsAsync.when(
-                        data: (items) => _buildMenuArea(
-                          items,
-                          cart,
-                          cartNotifier,
-                          isDark,
-                          isTablet,
-                        ),
-                        loading: () =>
-                            const Center(child: CircularProgressIndicator()),
-                        error: (e, _) =>
-                            Center(child: Text('Error loading items: $e')),
-                      ),
-                    ),
-                    // Mobile Bottom Panel
-                    if (!isTablet && cart.isNotEmpty)
-                      _buildMobileOrderPanel(cart, isDark),
-                  ],
+                child: itemGroupsAsync.when(
+                  data: (items) => _buildMenuArea(
+                    items,
+                    cart,
+                    cartNotifier,
+                    isDark,
+                    isTablet,
+                  ),
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
+                  error: (e, _) =>
+                      Center(child: Text('Error loading items: $e')),
                 ),
               ),
-
-              // ─── RIGHT: Billing Panel ──────────────────────
-              if (isTablet && _showBillingPanel)
-                GestureDetector(
-                  onHorizontalDragEnd: (details) {
-                    final velocity = details.primaryVelocity ?? 0;
-                    if (velocity > 300) {
-                      // Swipe right → close billing panel
-                      setState(() => _showBillingPanel = false);
-                    } else if (velocity < -300) {
-                      // Swipe left → open drawer
-                      _scaffoldKey.currentState?.openDrawer();
-                    }
-                  },
-                  child: Container(
-                    width: 360,
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? AppColors.darkSurface
-                          : AppColors.lightSurface,
-                      border: Border(
-                        left: BorderSide(
-                          color: isDark
-                              ? AppColors.darkBorder.withValues(alpha: 0.3)
-                              : AppColors.lightBorder.withValues(alpha: 0.4),
-                        ),
-                      ),
-                    ),
-                    child: _buildBillingPanel(cart, cartNotifier, isDark, user),
-                  ),
-                ).animate().slideX(begin: 1.0, end: 0.0, duration: 200.ms),
+              // Mobile Bottom Panel
+              if (!isTablet && cart.isNotEmpty)
+                _buildMobileOrderPanel(cart, user),
             ],
           ),
-          // Toggle arrows
+          // Toggle arrows (Navigation ONLY)
           _buildSideToggles(isTablet),
 
           // Swiggy Cart Animation Overlay
-          if (_showCartAnimation) _buildCartAnimationOverlay(cart, isDark),
+          if (_showCartAnimation) _buildCartAnimationOverlay(cart, user),
         ],
       ),
       // Bottom sheet billing for mobile
       bottomSheet: !isTablet && cart.isNotEmpty
-          ? _buildMobileOrderPanel(cart, isDark)
+          ? _buildMobileOrderPanel(cart, user)
           : null,
     );
   }
@@ -188,7 +158,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           children: [
             IconButton(
               icon: const Icon(Icons.menu_rounded),
-              onPressed: () => Scaffold.of(context).openDrawer(),
+              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
             ),
             const SizedBox(width: 8),
             Container(
@@ -287,7 +257,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           bottom: 0,
           child: Center(
             child: GestureDetector(
-              onTap: () => Scaffold.of(context).openDrawer(),
+              onTap: () => _scaffoldKey.currentState?.openDrawer(),
               child: Container(
                 height: 60,
                 width: 14,
@@ -309,38 +279,23 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
             ),
           ),
         ),
-        // Right Edge Toggle (Billing Panel)
+        // Right Edge Toggle (Visual cue ONLY)
         if (isTablet)
           Positioned(
             right: 0,
             top: 0,
             bottom: 0,
             child: Center(
-              child: GestureDetector(
-                onTap: () =>
-                    setState(() => _showBillingPanel = !_showBillingPanel),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.resizeLeft,
                 child: Container(
                   height: 60,
-                  width: 14,
+                  width: 6,
                   decoration: BoxDecoration(
-                    color: AppColors.primaryOrange.withValues(alpha: 0.9),
+                    color: AppColors.primaryOrange.withValues(alpha: 0.3),
                     borderRadius: const BorderRadius.horizontal(
                       left: Radius.circular(8),
                     ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
-                        blurRadius: 4,
-                        offset: const Offset(-2, 0),
-                      ),
-                    ],
-                  ),
-                  child: Icon(
-                    _showBillingPanel
-                        ? Icons.chevron_right_rounded
-                        : Icons.chevron_left_rounded,
-                    color: Colors.white,
-                    size: 14,
                   ),
                 ),
               ),
@@ -564,7 +519,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
         );
 
         return SimpleVariantTile(
-              name: v.variantName,
+              name: (v.variantName.toLowerCase() == 'default')
+                  ? master.itemName
+                  : v.variantName,
               price: v.baseRate,
               foodType: master.foodType,
               imageUrl: v.imageUrl ?? master.imageUrl,
@@ -610,9 +567,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     final filteredList = flatList.where((entry) {
       final master = entry['master'] as Item;
       final variant = entry['variant'] as ItemVariant?;
-      final fullName = variant != null
-          ? '${master.itemName} ${variant.variantName}'
-          : master.itemName;
+      final fullName =
+          (variant == null || variant.variantName.toLowerCase() == 'default')
+          ? master.itemName
+          : '${master.itemName} ${variant.variantName}';
       return _searchQuery.isEmpty ||
           fullName.toLowerCase().contains(_searchQuery.toLowerCase());
     }).toList();
@@ -638,7 +596,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           orElse: () => CartItem(item: master, variant: variant, qty: 0),
         );
 
-        final displayName = variant?.variantName ?? master.itemName;
+        final displayName =
+            (variant == null || variant.variantName.toLowerCase() == 'default')
+            ? master.itemName
+            : variant.variantName;
 
         return SimpleVariantTile(
               name: displayName,
@@ -681,6 +642,56 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     );
   }
 
+  void _showBillingSheet(UserProfile user) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Consumer(
+        builder: (context, ref, child) {
+          final cart = ref.watch(cartProvider(null));
+          final cartNotifier = ref.read(cartProvider(null).notifier);
+          final isDark = ref.watch(isDarkModeProvider);
+
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.85,
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(24),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 20,
+                  spreadRadius: 5,
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                const SizedBox(height: 12),
+                Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.2)
+                        : Colors.black.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Expanded(
+                  child: _buildBillingPanel(cart, cartNotifier, isDark, user),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   // ─── BILLING PANEL (Tablet) ────────────────────────────
   Widget _buildBillingPanel(
     List<CartItem> cart,
@@ -697,8 +708,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
       children: [
         // Header
         Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(24, 28, 20, 20),
           decoration: BoxDecoration(
+            color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
             border: Border(
               bottom: BorderSide(
                 color: isDark
@@ -709,36 +721,46 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           ),
           child: Row(
             children: [
-              Icon(
-                Icons.receipt_long_rounded,
-                size: 20,
-                color: isDark
-                    ? AppColors.primaryAmber
-                    : AppColors.primaryOrange,
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                      .withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  Icons.receipt_long_rounded,
+                  size: 18,
+                  color: isDark
+                      ? AppColors.primaryAmber
+                      : AppColors.primaryOrange,
+                ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 12),
               Text(
                 'Current Bill',
                 style: GoogleFonts.inter(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.5,
                 ),
               ),
               const Spacer(),
-              IconButton(
-                icon: const Icon(Icons.menu_rounded, size: 20),
-                onPressed: () => Scaffold.of(context).openDrawer(),
-              ),
               if (cart.isNotEmpty)
-                TextButton(
+                TextButton.icon(
                   onPressed: () => cartNotifier.clear(),
-                  child: Text(
+                  icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                  label: Text(
                     'Clear',
                     style: GoogleFonts.inter(
                       fontSize: 12,
                       color: AppColors.error,
-                      fontWeight: FontWeight.w600,
+                      fontWeight: FontWeight.w700,
                     ),
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.error,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   ),
                 ),
             ],
@@ -783,11 +805,11 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                     return CartItemRow(
                       cartItem: ci,
                       onIncrement: () =>
-                          cartNotifier.incrementQty(ci.item.id, ci.variant?.id),
+                          ref.read(cartProvider(null).notifier).incrementQty(ci.item.id, ci.variant?.id),
                       onDecrement: () =>
-                          cartNotifier.decrementQty(ci.item.id, ci.variant?.id),
+                          ref.read(cartProvider(null).notifier).decrementQty(ci.item.id, ci.variant?.id),
                       onRemove: () =>
-                          cartNotifier.removeItem(ci.item.id, ci.variant?.id),
+                          ref.read(cartProvider(null).notifier).removeItem(ci.item.id, ci.variant?.id),
                     );
                   },
                 ),
@@ -796,16 +818,23 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
         // Totals + Actions
         if (cart.isNotEmpty)
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: isDark
-                  ? AppColors.darkElevated.withValues(alpha: 0.5)
-                  : AppColors.lightElevated.withValues(alpha: 0.5),
+              color: isDark ? AppColors.darkElevated : AppColors.lightSurface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.15),
+                  blurRadius: 30,
+                  spreadRadius: 0,
+                  offset: const Offset(0, -10),
+                ),
+              ],
               border: Border(
                 top: BorderSide(
                   color: isDark
-                      ? AppColors.darkBorder.withValues(alpha: 0.2)
-                      : AppColors.lightBorder.withValues(alpha: 0.3),
+                      ? AppColors.darkBorder.withValues(alpha: 0.1)
+                      : AppColors.lightBorder.withValues(alpha: 0.2),
                 ),
               ),
             ),
@@ -960,6 +989,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     try {
       await SupabaseService.createBill(
         companyId: user.companyId,
+        billedBy: user.id,
         subtotal: subtotal,
         discountAmount: discountAmount,
         totalAmount: total,
@@ -968,15 +998,21 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
             .map(
               (ci) => {
                 'item_id': ci.item.id,
+                'variant_id': ci.variant?.id,
                 'qty': ci.qty,
                 'rate': ci.rate,
-                'tax_percentage': 0,
+                'item_name': ci.itemName,
+                'hsn_code': ci.variant?.hsnCode ?? ci.item.hsnCode,
+                'gst_rate': ci.variant?.gstRate ?? ci.item.gstRate,
+                'is_taxable': ci.item.isTaxable,
+                'discount_item': 0,
+                'notes': ci.notes,
               },
             )
             .toList(),
       );
 
-      ref.read(cartProvider.notifier).clear();
+      ref.read(cartProvider(null).notifier).clear();
       ref.read(discountProvider.notifier).reset();
 
       if (mounted) {
@@ -1009,7 +1045,8 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   }
 
   // ─── MOBILE BILLING BAR ───────────────────────────────-
-  Widget _buildMobileOrderPanel(List<CartItem> cart, bool isDark) {
+  Widget _buildMobileOrderPanel(List<CartItem> cart, UserProfile user) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final total = cart.fold<double>(0, (sum, ci) => sum + ci.total);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -1049,7 +1086,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
             ),
             const Spacer(),
             ElevatedButton.icon(
-              onPressed: () => _showMobileCheckout(cart, isDark),
+              onPressed: () => _showBillingSheet(user),
               icon: const Icon(Icons.receipt_long_rounded, size: 18),
               label: const Text('View Bill'),
               style: ElevatedButton.styleFrom(
@@ -1065,44 +1102,17 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     );
   }
 
-  void _showMobileCheckout(List<CartItem> cart, bool isDark) {
-    // Show fullscreen bottom sheet for mobile checkout
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.85,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) {
-          final user = ref.watch(authStateProvider).value;
-          if (user == null) return const SizedBox.shrink();
-          return Container(
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
-              ),
-            ),
-            child: _buildBillingPanel(
-              cart,
-              ref.read(cartProvider.notifier),
-              isDark,
-              user,
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   // ─── CART ANIMATION TRIGGER ────────────────────────────
   void _triggerCartAnimation(Item item, ItemVariant? variant) {
-    final cartNotifier = ref.read(cartProvider.notifier);
+    final cartNotifier = ref.read(cartProvider(null).notifier);
     cartNotifier.addItem(item, variant);
 
     final now = DateTime.now();
     _lastAddEvent = now;
-    final displayName = variant?.variantName ?? item.itemName;
+    final displayName =
+        (variant == null || variant.variantName.toLowerCase() == 'default')
+        ? item.itemName
+        : variant.variantName;
 
     setState(() {
       _lastAddedItemName = displayName;
@@ -1127,7 +1137,8 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     });
   }
 
-  Widget _buildCartAnimationOverlay(List<CartItem> cart, bool isDark) {
+  Widget _buildCartAnimationOverlay(List<CartItem> cart, UserProfile user) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (cart.isEmpty) return const SizedBox.shrink();
 
     final totalQty = cart.fold<int>(0, (sum, ci) => sum + ci.qty);
@@ -1207,49 +1218,52 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                                     ),
                                   ),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          '$totalQty ITEMS IN CART',
-                                          style: GoogleFonts.inter(
-                                            color: Colors.white.withValues(
-                                              alpha: 0.8,
+                                child: InkWell(
+                                  onTap: () => _showBillingSheet(user),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '$totalQty ITEMS IN CART',
+                                            style: GoogleFonts.inter(
+                                              color: Colors.white.withValues(
+                                                alpha: 0.8,
+                                              ),
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: 0.5,
                                             ),
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w800,
-                                            letterSpacing: 0.5,
                                           ),
-                                        ),
-                                        Text(
-                                          '₹${subtotal.toStringAsFixed(0)} total',
-                                          style: GoogleFonts.inter(
-                                            color: Colors.white,
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w900,
+                                          Text(
+                                            '₹${subtotal.toStringAsFixed(0)} total',
+                                            style: GoogleFonts.inter(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w900,
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(width: 30),
-                                    Text(
-                                      'VIEW CART',
-                                      style: GoogleFonts.inter(
-                                        color: Colors.white,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w900,
+                                        ],
                                       ),
-                                    ),
-                                    const Icon(
-                                      Icons.arrow_forward_ios_rounded,
-                                      color: Colors.white,
-                                      size: 10,
-                                    ),
-                                  ],
+                                      const SizedBox(width: 30),
+                                      Text(
+                                        'VIEW Bill',
+                                        style: GoogleFonts.inter(
+                                          color: Colors.white,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                      const Icon(
+                                        Icons.arrow_forward_ios_rounded,
+                                        color: Colors.white,
+                                        size: 10,
+                                      ),
+                                    ],
+                                  ),
                                 ),
                               )
                             : const SizedBox.shrink(),
