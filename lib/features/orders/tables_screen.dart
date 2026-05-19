@@ -1,3 +1,4 @@
+import 'dart:math' show min;
 import 'package:cafe/core/services/supabase_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -29,12 +30,26 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   bool _isVoiceAIEnabled = false;
   String _lastWords = '';
   final _localParser = LocalParserService();
-  bool _showCartTab = false; // Toggle between Item Grid and Cart View
+  bool _showCartTab = false;
+
+  // Search
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  // Active-order checkout state
+  String _checkoutPaymentMode = 'CASH';
+  double _checkoutDiscount = 0;
 
   @override
   void initState() {
     super.initState();
     _initSpeech();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   void _initSpeech() async {
@@ -220,12 +235,12 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                       }
 
                       return GridView.builder(
-                        padding: EdgeInsets.all(isTablet ? 20 : 12),
+                        padding: EdgeInsets.all(isTablet ? 20 : 8),
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: isTablet ? 3 : 2,
-                          childAspectRatio: isTablet ? 1.8 : 1.25,
-                          crossAxisSpacing: isTablet ? 16 : 12,
-                          mainAxisSpacing: isTablet ? 16 : 12,
+                          childAspectRatio: isTablet ? 1.8 : 1.45,
+                          crossAxisSpacing: isTablet ? 16 : 8,
+                          mainAxisSpacing: isTablet ? 16 : 8,
                         ),
                         itemCount: tables.length,
                         itemBuilder: (context, index) {
@@ -312,494 +327,777 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     bool isTablet,
     UserProfile? user,
   ) {
-    final allItemsAsync = ref.watch(allItemsProvider(widget.companyId));
     final cart = ref.watch(cartProvider(_selectedTable?.id));
+
+    // Occupied table with no pending cart items → show active-order checkout
+    if (cart.isEmpty && (_selectedTable?.isOccupied ?? false)) {
+      return _buildActiveOrderCheckoutPanel(size, isDark, user);
+    }
+
+    final allItemsAsync = ref.watch(allItemsProvider(widget.companyId));
     final cartNotifier = ref.read(cartProvider(_selectedTable?.id).notifier);
+
+    final bool isMobile = size.width < 600;
+    final double panelWidth = isMobile
+        ? size.width
+        : min(360.0, size.width * 0.44);
+    final double panelHeight = isMobile ? size.height * 0.62 : size.height;
 
     return Positioned(
       right: 0,
-      top: 0,
       bottom: 0,
-      child: Hero(
-        tag: 'quickOrderPanel',
-        child: Container(
-          width: isTablet ? 450 : size.width,
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
-                blurRadius: 40,
-                offset: const Offset(-10, 0),
-              ),
-            ],
-            borderRadius: const BorderRadius.only(
-              topLeft: Radius.circular(32),
-              bottomLeft: Radius.circular(32),
-            ),
-            border: Border(
-              left: BorderSide(
-                color: isDark
-                    ? AppColors.darkBorder.withValues(alpha: 0.2)
-                    : AppColors.lightBorder.withValues(alpha: 0.4),
-              ),
-            ),
-          ),
-          child: Column(
-            children: [
-              // Panel Header
-              Container(
-                padding: const EdgeInsets.fromLTRB(24, 28, 20, 10),
-                child: Column(
-                  children: [
-                    Row(
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Quick Order',
-                              style: GoogleFonts.inter(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: -0.5,
-                              ),
-                            ),
-                            Text(
-                              'Table: ${_selectedTable?.tableName}',
-                              style: GoogleFonts.inter(
-                                fontSize: 14,
-                                color: isDark
-                                    ? AppColors.primaryAmber
-                                    : AppColors.primaryOrange,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const Spacer(),
-                        if (cart.isNotEmpty)
-                          TextButton(
-                            onPressed: () => ref
-                                .read(cartProvider(_selectedTable?.id).notifier)
-                                .clear(),
-                            child: Text(
-                              'Clear',
-                              style: GoogleFonts.inter(
-                                color: AppColors.error,
-                                fontWeight: FontWeight.w700,
-                                fontSize: 13,
-                              ),
-                            ),
+      top: isMobile ? null : 0,
+      left: isMobile ? 0 : null,
+      child:
+          Hero(
+                tag: 'quickOrderPanel',
+                child: Container(
+                  width: panelWidth,
+                  height: panelHeight,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.darkSurface
+                        : AppColors.lightSurface,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.25),
+                        blurRadius: 30,
+                        offset: isMobile
+                            ? const Offset(0, -6)
+                            : const Offset(-8, 0),
+                      ),
+                    ],
+                    borderRadius: isMobile
+                        ? const BorderRadius.vertical(top: Radius.circular(24))
+                        : const BorderRadius.only(
+                            topLeft: Radius.circular(24),
+                            bottomLeft: Radius.circular(24),
                           ),
-                        Switch(
-                          value: _isVoiceAIEnabled,
-                          activeColor: AppColors.primaryAmber,
-                          onChanged: (val) =>
-                              setState(() => _isVoiceAIEnabled = val),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close_rounded),
-                          onPressed: () {
-                            setState(() {
-                              _selectedTable = null;
-                              _selectedCategory = null;
-                              _showCartTab = false;
-                            });
-                          },
-                          style: IconButton.styleFrom(
-                            backgroundColor: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.black.withValues(alpha: 0.05),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    // View Toggle (Browse vs Cart)
-                    Row(
-                      children: [
-                        _buildTabButton(
-                          'Items',
-                          !_showCartTab,
-                          isDark,
-                          () => setState(() => _showCartTab = false),
-                        ),
-                        const SizedBox(width: 8),
-                        Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            _buildTabButton(
-                              'Cart',
-                              _showCartTab,
-                              isDark,
-                              () => setState(() => _showCartTab = true),
-                            ),
-                            if (cart.isNotEmpty)
-                              Positioned(
-                                right: -4,
-                                top: -4,
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: const BoxDecoration(
-                                    color: AppColors.primaryOrange,
-                                    shape: BoxShape.circle,
-                                  ),
-                                  constraints: const BoxConstraints(
-                                    minWidth: 16,
-                                    minHeight: 16,
-                                  ),
-                                  child: Text(
-                                    '${cart.length}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 8,
-                                      fontWeight: FontWeight.bold,
+                    border: Border(
+                      left: isMobile
+                          ? BorderSide.none
+                          : BorderSide(
+                              color: isDark
+                                  ? AppColors.darkBorder.withValues(alpha: 0.2)
+                                  : AppColors.lightBorder.withValues(
+                                      alpha: 0.4,
                                     ),
-                                    textAlign: TextAlign.center,
+                            ),
+                      top: isMobile
+                          ? BorderSide(
+                              color: isDark
+                                  ? AppColors.darkBorder.withValues(alpha: 0.2)
+                                  : AppColors.lightBorder.withValues(
+                                      alpha: 0.3,
+                                    ),
+                            )
+                          : BorderSide.none,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      // Drag handle for mobile
+                      if (isMobile)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10, bottom: 4),
+                          child: Container(
+                            width: 36,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.2)
+                                  : Colors.black.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        ),
+                      // Panel Header
+                      Container(
+                        padding: EdgeInsets.fromLTRB(
+                          12,
+                          isMobile ? 4 : 16,
+                          12,
+                          isMobile ? 4 : 8,
+                        ),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Quick Order',
+                                      style: GoogleFonts.inter(
+                                        fontSize: isMobile ? 14 : 16,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: -0.3,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Table: ${_selectedTable?.tableName}',
+                                      style: GoogleFonts.inter(
+                                        fontSize: isMobile ? 11 : 12,
+                                        color: isDark
+                                            ? AppColors.primaryAmber
+                                            : AppColors.primaryOrange,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const Spacer(),
+                                if (cart.isNotEmpty)
+                                  TextButton(
+                                    onPressed: () => ref
+                                        .read(
+                                          cartProvider(
+                                            _selectedTable?.id,
+                                          ).notifier,
+                                        )
+                                        .clear(),
+                                    child: Text(
+                                      'Clear',
+                                      style: GoogleFonts.inter(
+                                        color: AppColors.error,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: isMobile ? 12 : 13,
+                                      ),
+                                    ),
+                                  ),
+                                Transform.scale(
+                                  scale: isMobile ? 0.8 : 1.0,
+                                  child: Switch(
+                                    value: _isVoiceAIEnabled,
+                                    activeThumbColor: AppColors.primaryAmber,
+                                    onChanged: (val) =>
+                                        setState(() => _isVoiceAIEnabled = val),
                                   ),
                                 ),
-                              ),
+                                IconButton(
+                                  icon: const Icon(Icons.close_rounded),
+                                  iconSize: isMobile ? 20 : 24,
+                                  onPressed: () {
+                                    setState(() {
+                                      _selectedTable = null;
+                                      _selectedCategory = null;
+                                      _showCartTab = false;
+                                      _searchQuery = '';
+                                      _searchController.clear();
+                                    });
+                                  },
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: isDark
+                                        ? Colors.white.withValues(alpha: 0.05)
+                                        : Colors.black.withValues(alpha: 0.05),
+                                    padding: isMobile
+                                        ? const EdgeInsets.all(6)
+                                        : null,
+                                    minimumSize: isMobile
+                                        ? const Size(32, 32)
+                                        : null,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            SizedBox(height: isMobile ? 8 : 16),
+                            // View Toggle (Browse vs Cart)
+                            Row(
+                              children: [
+                                _buildTabButton(
+                                  'Items',
+                                  !_showCartTab,
+                                  isDark,
+                                  () => setState(() => _showCartTab = false),
+                                ),
+                                const SizedBox(width: 8),
+                                Stack(
+                                  clipBehavior: Clip.none,
+                                  children: [
+                                    _buildTabButton(
+                                      'Cart',
+                                      _showCartTab,
+                                      isDark,
+                                      () => setState(() => _showCartTab = true),
+                                    ),
+                                    if (cart.isNotEmpty)
+                                      Positioned(
+                                        right: -4,
+                                        top: -4,
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: const BoxDecoration(
+                                            color: AppColors.primaryOrange,
+                                            shape: BoxShape.circle,
+                                          ),
+                                          constraints: const BoxConstraints(
+                                            minWidth: 16,
+                                            minHeight: 16,
+                                          ),
+                                          child: Text(
+                                            '${cart.length}',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ],
                         ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+                      ),
 
-              // Item Browser / Cart View
-              Expanded(
-                child: _showCartTab
-                    ? _buildCartView(cart, cartNotifier, isDark)
-                    : Stack(
-                        children: [
-                          allItemsAsync.when(
-                            data: (items) {
-                              // Get categories for chips
-                              final categories = items
-                                  .map((i) => i.sectionLabel)
-                                  .whereType<String>()
-                                  .toSet()
-                                  .toList();
-                              categories.sort();
-
-                              // Filter items by category first
-                              final filteredItems = _selectedCategory == null
-                                  ? items
-                                  : items
-                                        .where(
-                                          (i) =>
-                                              i.sectionLabel ==
-                                              _selectedCategory,
-                                        )
-                                        .toList();
-
-                              // Flatten filtered items + variants
-                              final List<Map<String, dynamic>> flatList = [];
-                              for (final item in filteredItems) {
-                                if (!item.hasVariants ||
-                                    item.variants.isEmpty) {
-                                  flatList.add({
-                                    'master': item,
-                                    'variant': null,
-                                  });
-                                } else {
-                                  for (final v in item.variants) {
-                                    flatList.add({
-                                      'master': item,
-                                      'variant': v,
-                                    });
-                                  }
-                                }
-                              }
-
-                              return Column(
+                      // Item Browser / Cart View
+                      Expanded(
+                        child: _showCartTab
+                            ? _buildCartView(cart, cartNotifier, isDark)
+                            : Stack(
                                 children: [
-                                  // Quick Categories
-                                  SingleChildScrollView(
-                                    scrollDirection: Axis.horizontal,
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: isTablet ? 20 : 12,
-                                      vertical: isTablet ? 10 : 8,
+                                  allItemsAsync.when(
+                                    data: (items) {
+                                      // Get categories for chips
+                                      final categories = items
+                                          .map((i) => i.sectionLabel)
+                                          .whereType<String>()
+                                          .toSet()
+                                          .toList();
+                                      categories.sort();
+
+                                      // Filter items by category first
+                                      final filteredItems =
+                                          _selectedCategory == null
+                                          ? items
+                                          : items
+                                                .where(
+                                                  (i) =>
+                                                      i.sectionLabel ==
+                                                      _selectedCategory,
+                                                )
+                                                .toList();
+
+                                      // Flatten filtered items + variants
+                                      final List<Map<String, dynamic>>
+                                      flatList = [];
+                                      for (final item in filteredItems) {
+                                        if (!item.hasVariants ||
+                                            item.variants.isEmpty) {
+                                          flatList.add({
+                                            'master': item,
+                                            'variant': null,
+                                          });
+                                        } else {
+                                          for (final v in item.variants) {
+                                            flatList.add({
+                                              'master': item,
+                                              'variant': v,
+                                            });
+                                          }
+                                        }
+                                      }
+
+                                      // Apply search filter on top of category filter
+                                      final searchQ = _searchQuery
+                                          .toLowerCase();
+                                      final searchFiltered = searchQ.isEmpty
+                                          ? flatList
+                                          : flatList.where((m) {
+                                              final it = m['master'] as Item;
+                                              final va =
+                                                  m['variant'] as ItemVariant?;
+                                              return it.itemName
+                                                      .toLowerCase()
+                                                      .contains(searchQ) ||
+                                                  (va != null &&
+                                                      va.variantName
+                                                          .toLowerCase()
+                                                          .contains(searchQ));
+                                            }).toList();
+
+                                      return Column(
+                                        children: [
+                                          // Search field
+                                          Padding(
+                                            padding: const EdgeInsets.fromLTRB(
+                                              12,
+                                              4,
+                                              12,
+                                              4,
+                                            ),
+                                            child: SizedBox(
+                                              height: 36,
+                                              child: TextField(
+                                                controller: _searchController,
+                                                onChanged: (v) => setState(
+                                                  () => _searchQuery = v,
+                                                ),
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 13,
+                                                ),
+                                                decoration: InputDecoration(
+                                                  hintText: 'Search items...',
+                                                  hintStyle: GoogleFonts.inter(
+                                                    fontSize: 13,
+                                                  ),
+                                                  prefixIcon: const Icon(
+                                                    Icons.search_rounded,
+                                                    size: 18,
+                                                  ),
+                                                  suffixIcon:
+                                                      _searchQuery.isNotEmpty
+                                                      ? IconButton(
+                                                          icon: const Icon(
+                                                            Icons.clear_rounded,
+                                                            size: 16,
+                                                          ),
+                                                          onPressed: () =>
+                                                              setState(() {
+                                                                _searchQuery =
+                                                                    '';
+                                                                _searchController
+                                                                    .clear();
+                                                              }),
+                                                          padding:
+                                                              EdgeInsets.zero,
+                                                          constraints:
+                                                              const BoxConstraints(),
+                                                        )
+                                                      : null,
+                                                  filled: true,
+                                                  fillColor: isDark
+                                                      ? Colors.white.withValues(
+                                                          alpha: 0.07,
+                                                        )
+                                                      : Colors.black.withValues(
+                                                          alpha: 0.05,
+                                                        ),
+                                                  contentPadding:
+                                                      EdgeInsets.zero,
+                                                  border: OutlineInputBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
+                                                    borderSide: BorderSide.none,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+
+                                          // Category chips
+                                          SingleChildScrollView(
+                                            scrollDirection: Axis.horizontal,
+                                            padding: EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: isMobile ? 4 : 6,
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                _buildPanelCategoryChip(
+                                                  'All',
+                                                  _selectedCategory == null,
+                                                  isDark,
+                                                  isTablet,
+                                                  () => setState(
+                                                    () => _selectedCategory =
+                                                        null,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 6),
+                                                ...categories.map(
+                                                  (s) => Padding(
+                                                    padding:
+                                                        const EdgeInsets.only(
+                                                          right: 6,
+                                                        ),
+                                                    child: _buildPanelCategoryChip(
+                                                      s,
+                                                      _selectedCategory == s,
+                                                      isDark,
+                                                      isTablet,
+                                                      () => setState(
+                                                        () =>
+                                                            _selectedCategory =
+                                                                s,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+
+                                          // Item Grid
+                                          Expanded(
+                                            child: searchFiltered.isEmpty
+                                                ? Center(
+                                                    child: Text(
+                                                      'No items found',
+                                                      style: GoogleFonts.inter(
+                                                        fontSize: 13,
+                                                        color: isDark
+                                                            ? AppColors
+                                                                  .textWhiteMuted
+                                                            : AppColors
+                                                                  .textDarkMuted,
+                                                      ),
+                                                    ),
+                                                  )
+                                                : GridView.builder(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          horizontal: 8,
+                                                        ),
+                                                    gridDelegate:
+                                                        SliverGridDelegateWithFixedCrossAxisCount(
+                                                          crossAxisCount:
+                                                              isMobile ? 4 : 3,
+                                                          crossAxisSpacing:
+                                                              isMobile ? 6 : 8,
+                                                          mainAxisSpacing:
+                                                              isMobile ? 6 : 8,
+                                                          childAspectRatio:
+                                                              isMobile
+                                                              ? 0.88
+                                                              : 0.75,
+                                                        ),
+                                                    itemCount:
+                                                        searchFiltered.length,
+                                                    itemBuilder: (context, index) {
+                                                      final master =
+                                                          searchFiltered[index]['master']
+                                                              as Item;
+                                                      final variant =
+                                                          searchFiltered[index]['variant']
+                                                              as ItemVariant?;
+
+                                                      final cartCount = cart
+                                                          .firstWhere(
+                                                            (ci) =>
+                                                                ci.item.id ==
+                                                                    master.id &&
+                                                                ci
+                                                                        .variant
+                                                                        ?.id ==
+                                                                    variant?.id,
+                                                            orElse: () =>
+                                                                CartItem(
+                                                                  item: master,
+                                                                  variant:
+                                                                      variant,
+                                                                  qty: 0,
+                                                                ),
+                                                          )
+                                                          .qty;
+
+                                                      return _CompactItemTile(
+                                                            master: master,
+                                                            variant: variant,
+                                                            isDark: isDark,
+                                                            cartCount:
+                                                                cartCount,
+                                                            onTap: () =>
+                                                                cartNotifier
+                                                                    .addItem(
+                                                                      master,
+                                                                      variant,
+                                                                    ),
+                                                          )
+                                                          .animate()
+                                                          .fadeIn(
+                                                            delay:
+                                                                (15 * index).ms,
+                                                          )
+                                                          .scale(
+                                                            begin: const Offset(
+                                                              0.9,
+                                                              0.9,
+                                                            ),
+                                                            duration: 180.ms,
+                                                          );
+                                                    },
+                                                  ),
+                                          ),
+                                        ],
+                                      );
+                                    },
+                                    loading: () => const Center(
+                                      child: CircularProgressIndicator(),
                                     ),
-                                    child: Row(
+                                    error: (e, _) =>
+                                        Center(child: Text('Error: $e')),
+                                  ),
+
+                                  // Floating Microphone Button
+                                  if (_isVoiceAIEnabled)
+                                    Positioned(
+                                      right: 20,
+                                      bottom: 20,
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (_isProcessingAI)
+                                            const Padding(
+                                              padding: EdgeInsets.only(
+                                                bottom: 12,
+                                              ),
+                                              child: CircularProgressIndicator(
+                                                color: AppColors.primaryAmber,
+                                              ),
+                                            )
+                                          else if (_isListening)
+                                            Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 6,
+                                                      ),
+                                                  margin: const EdgeInsets.only(
+                                                    bottom: 12,
+                                                  ),
+                                                  decoration: BoxDecoration(
+                                                    color: AppColors.error
+                                                        .withValues(alpha: 0.1),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          20,
+                                                        ),
+                                                  ),
+                                                  child: Text(
+                                                    'Listening...',
+                                                    style: GoogleFonts.inter(
+                                                      color: AppColors.error,
+                                                      fontSize: 8,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                )
+                                                .animate(
+                                                  onPlay: (controller) =>
+                                                      controller.repeat(),
+                                                )
+                                                .fadeOut(duration: 800.ms)
+                                                .fadeIn(duration: 800.ms),
+
+                                          FloatingActionButton(
+                                                heroTag: null,
+                                                onPressed: _isListening
+                                                    ? _stopListening
+                                                    : _startListening,
+                                                backgroundColor: _isListening
+                                                    ? AppColors.error
+                                                    : AppColors.primaryOrange,
+                                                elevation: 8,
+                                                child: Icon(
+                                                  _isListening
+                                                      ? Icons.stop
+                                                      : Icons.mic,
+                                                ),
+                                              )
+                                              .animate(
+                                                target: _isListening ? 1 : 0,
+                                              )
+                                              .scale(
+                                                begin: const Offset(1, 1),
+                                                end: const Offset(1.1, 1.1),
+                                                duration: 500.ms,
+                                              ),
+                                        ],
+                                      ),
+                                    ),
+                                ],
+                              ),
+                      ),
+
+                      // Cart Summary & Action
+                      if (cart.isNotEmpty)
+                        SafeArea(
+                          top: false,
+                          child:
+                              Container(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  12,
+                                  16,
+                                  12,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? AppColors.darkCard
+                                      : AppColors.lightCard,
+                                  borderRadius: const BorderRadius.vertical(
+                                    top: Radius.circular(20),
+                                  ),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
                                       children: [
-                                        _buildPanelCategoryChip(
-                                          'All',
-                                          _selectedCategory == null,
-                                          isDark,
-                                          isTablet,
-                                          () => setState(
-                                            () => _selectedCategory = null,
+                                        Text(
+                                          '${cart.length} items selected',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        Text(
+                                          '₹${cart.fold(0.0, (sum, ci) => sum + ci.total).toStringAsFixed(0)}',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.w800,
+                                            color: isDark
+                                                ? AppColors.primaryAmber
+                                                : AppColors.primaryOrange,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: OutlinedButton(
+                                            style: OutlinedButton.styleFrom(
+                                              side: BorderSide(
+                                                color: isDark
+                                                    ? AppColors.primaryAmber
+                                                    : AppColors.primaryOrange,
+                                              ),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 10,
+                                                  ),
+                                              minimumSize: Size.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                            ),
+                                            onPressed: _saveOrder,
+                                            child: FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.receipt_outlined,
+                                                    size: 13,
+                                                    color: isDark
+                                                        ? AppColors.primaryAmber
+                                                        : AppColors
+                                                              .primaryOrange,
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    'SAVE KOT',
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: isDark
+                                                          ? AppColors
+                                                                .primaryAmber
+                                                          : AppColors
+                                                                .primaryOrange,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
                                           ),
                                         ),
                                         const SizedBox(width: 8),
-                                        ...categories.map(
-                                          (s) => Padding(
-                                            padding: const EdgeInsets.only(
-                                              right: 8,
+                                        Expanded(
+                                          child: ElevatedButton(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: isDark
+                                                  ? AppColors.primaryAmber
+                                                  : AppColors.primaryOrange,
+                                              foregroundColor: Colors.white,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    vertical: 10,
+                                                  ),
+                                              minimumSize: Size.zero,
+                                              tapTargetSize:
+                                                  MaterialTapTargetSize
+                                                      .shrinkWrap,
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              elevation: 0,
                                             ),
-                                            child: _buildPanelCategoryChip(
-                                              s,
-                                              _selectedCategory == s,
-                                              isDark,
-                                              isTablet,
-                                              () => setState(
-                                                () => _selectedCategory = s,
+                                            onPressed: () =>
+                                                _showTableBillingSheet(
+                                                  context,
+                                                  ref,
+                                                  _selectedTable!,
+                                                  cart,
+                                                  user!,
+                                                ),
+                                            child: const FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.payment_rounded,
+                                                    size: 13,
+                                                  ),
+                                                  SizedBox(width: 4),
+                                                  Text(
+                                                    'CHECKOUT',
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
                                           ),
                                         ),
                                       ],
                                     ),
-                                  ),
-
-                                  // Grid
-                                  Expanded(
-                                    child: GridView.builder(
-                                      padding: EdgeInsets.symmetric(
-                                        horizontal: isTablet ? 20 : 12,
-                                      ),
-                                      gridDelegate:
-                                          SliverGridDelegateWithFixedCrossAxisCount(
-                                            crossAxisCount: isTablet ? 3 : 2,
-                                            crossAxisSpacing: isTablet ? 10 : 8,
-                                            mainAxisSpacing: isTablet ? 10 : 8,
-                                            childAspectRatio: isTablet ? 0.78 : 0.85,
-                                          ),
-                                      itemCount: flatList.length,
-                                      itemBuilder: (context, index) {
-                                        final master =
-                                            flatList[index]['master'] as Item;
-                                        final variant =
-                                            flatList[index]['variant']
-                                                as ItemVariant?;
-
-                                        // Calculate quantity in cart
-                                        final cartCount = cart
-                                            .firstWhere(
-                                              (ci) =>
-                                                  ci.item.id == master.id &&
-                                                  ci.variant?.id == variant?.id,
-                                              orElse: () => CartItem(
-                                                item: master,
-                                                variant: variant,
-                                                qty: 0,
-                                              ),
-                                            )
-                                            .qty;
-
-                                        return _CompactItemTile(
-                                              master: master,
-                                              variant: variant,
-                                              isDark: isDark,
-                                              cartCount: cartCount,
-                                              onTap: () {
-                                                cartNotifier.addItem(
-                                                  master,
-                                                  variant,
-                                                );
-                                              },
-                                            )
-                                            .animate()
-                                            .fadeIn(delay: (20 * index).ms)
-                                            .scale(
-                                              begin: const Offset(0.9, 0.9),
-                                              duration: 200.ms,
-                                            );
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                            loading: () => const Center(
-                              child: CircularProgressIndicator(),
-                            ),
-                            error: (e, _) => Center(child: Text('Error: $e')),
-                          ),
-
-                          // Floating Microphone Button
-                          if (_isVoiceAIEnabled)
-                            Positioned(
-                              right: 20,
-                              bottom: 20,
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  if (_isProcessingAI)
-                                    const Padding(
-                                      padding: EdgeInsets.only(bottom: 12),
-                                      child: CircularProgressIndicator(
-                                        color: AppColors.primaryAmber,
-                                      ),
-                                    )
-                                  else if (_isListening)
-                                    Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 6,
-                                          ),
-                                          margin: const EdgeInsets.only(
-                                            bottom: 12,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: AppColors.error.withValues(
-                                              alpha: 0.1,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              20,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            'Listening...',
-                                            style: GoogleFonts.inter(
-                                              color: AppColors.error,
-                                              fontSize: 8,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        )
-                                        .animate(
-                                          onPlay: (controller) =>
-                                              controller.repeat(),
-                                        )
-                                        .fadeOut(duration: 800.ms)
-                                        .fadeIn(duration: 800.ms),
-
-                                  FloatingActionButton(
-                                        heroTag: null,
-                                        onPressed: _isListening
-                                            ? _stopListening
-                                            : _startListening,
-                                        backgroundColor: _isListening
-                                            ? AppColors.error
-                                            : AppColors.primaryOrange,
-                                        elevation: 8,
-                                        child: Icon(
-                                          _isListening ? Icons.stop : Icons.mic,
-                                        ),
-                                      )
-                                      .animate(target: _isListening ? 1 : 0)
-                                      .scale(
-                                        begin: const Offset(1, 1),
-                                        end: const Offset(1.1, 1.1),
-                                        duration: 500.ms,
-                                      ),
-                                ],
+                                  ],
+                                ),
+                              ).animate().slideY(
+                                begin: 1.0,
+                                duration: 300.ms,
+                                curve: Curves.easeOutCubic,
                               ),
-                            ),
-                        ],
-                      ),
-              ),
-
-              // Cart Summary & Action
-              if (cart.isNotEmpty)
-                Container(
-                  padding: const EdgeInsets.all(24),
-                  decoration: BoxDecoration(
-                    color: isDark ? AppColors.darkCard : AppColors.lightCard,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(24),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '${cart.length} items selected',
-                            style: GoogleFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            '₹${cart.fold(0.0, (sum, ci) => sum + ci.total).toStringAsFixed(0)}',
-                            style: GoogleFonts.inter(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: isDark
-                                  ? AppColors.primaryAmber
-                                  : AppColors.primaryOrange,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: SizedBox(
-                              height: 54,
-                              child: OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  side: BorderSide(
-                                    color: isDark
-                                        ? AppColors.primaryAmber
-                                        : AppColors.primaryOrange,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ),
-                                onPressed: _saveOrder,
-                                child: Text(
-                                  'SAVE ORDER',
-                                  style: TextStyle(
-                                    fontWeight: FontWeight.bold,
-                                    color: isDark
-                                        ? AppColors.primaryAmber
-                                        : AppColors.primaryOrange,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: SizedBox(
-                              height: 54,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: isDark
-                                      ? AppColors.primaryAmber
-                                      : AppColors.primaryOrange,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                  elevation: 0,
-                                ),
-                                onPressed: () => _showTableBillingSheet(
-                                  context,
-                                  ref,
-                                  _selectedTable!,
-                                  cart,
-                                  user!,
-                                ),
-                                child: const Text(
-                                  'CHECKOUT',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
                     ],
                   ),
-                ).animate().slideY(
-                  begin: 1.0,
-                  duration: 300.ms,
-                  curve: Curves.easeOutCubic,
                 ),
-            ],
-          ),
-        ),
-      ).animate().slideX(begin: 1.0, duration: 400.ms, curve: Curves.easeOutQuart),
+              )
+              .animate()
+              .slideY(
+                begin: isMobile ? 1.0 : 0.0,
+                end: 0.0,
+                duration: 350.ms,
+                curve: Curves.easeOutCubic,
+              )
+              .slideX(
+                begin: isMobile ? 0.0 : 1.0,
+                end: 0.0,
+                duration: 350.ms,
+                curve: Curves.easeOutCubic,
+              ),
     );
   }
 
@@ -846,8 +1144,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       itemBuilder: (context, index) {
         final ci = cart[index];
         return Container(
-          margin: EdgeInsets.only(bottom: isTablet ? 12 : 8),
-          padding: EdgeInsets.all(isTablet ? 16 : 12),
+          margin: const EdgeInsets.only(bottom: 6),
+          padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: isDark ? AppColors.darkCard : AppColors.lightCard,
             borderRadius: BorderRadius.circular(20),
@@ -859,6 +1157,28 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
           ),
           child: Row(
             children: [
+              // Item thumbnail
+              Builder(
+                builder: (_) {
+                  final imageUrl = ci.variant?.imageUrl ?? ci.item.imageUrl;
+                  return ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: 44,
+                      height: 44,
+                      child: imageUrl != null && imageUrl.isNotEmpty
+                          ? Image.network(
+                              imageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) =>
+                                  _cartImagePlaceholder(isDark),
+                            )
+                          : _cartImagePlaceholder(isDark),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -866,27 +1186,29 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                     Text(
                       ci.item.itemName,
                       style: GoogleFonts.inter(
-                        fontSize: isTablet ? 15 : 14,
+                        fontSize: 13,
                         fontWeight: FontWeight.w700,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     if (ci.variant != null &&
                         ci.variant!.variantName.toLowerCase() != 'default')
                       Text(
                         ci.variant!.variantName,
                         style: GoogleFonts.inter(
-                          fontSize: isTablet ? 12 : 11,
+                          fontSize: 11,
                           color: isDark
                               ? AppColors.primaryAmber
                               : AppColors.primaryOrange,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       '₹${ci.rate.toStringAsFixed(0)}',
                       style: GoogleFonts.inter(
-                        fontSize: isTablet ? 13 : 12,
+                        fontSize: 12,
                         color: isDark
                             ? AppColors.textWhiteMuted
                             : AppColors.textDarkMuted,
@@ -904,7 +1226,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                     isTablet,
                   ),
                   Padding(
-                    padding: EdgeInsets.symmetric(horizontal: isTablet ? 12 : 8),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: isTablet ? 12 : 8,
+                    ),
                     child: Text(
                       '${ci.qty}',
                       style: GoogleFonts.inter(
@@ -921,7 +1245,10 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                   ),
                   const SizedBox(width: 4),
                   IconButton(
-                    icon: Icon(Icons.delete_outline_rounded, size: isTablet ? 20 : 18),
+                    icon: Icon(
+                      Icons.delete_outline_rounded,
+                      size: isTablet ? 20 : 18,
+                    ),
                     color: AppColors.error,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
@@ -937,7 +1264,27 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     );
   }
 
-  Widget _buildQtyButton(IconData icon, VoidCallback onTap, bool isDark, bool isTablet) {
+  Widget _cartImagePlaceholder(bool isDark) {
+    return Container(
+      color: isDark
+          ? Colors.white.withValues(alpha: 0.06)
+          : Colors.black.withValues(alpha: 0.04),
+      child: Icon(
+        Icons.fastfood_rounded,
+        size: 20,
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.25)
+            : Colors.black.withValues(alpha: 0.2),
+      ),
+    );
+  }
+
+  Widget _buildQtyButton(
+    IconData icon,
+    VoidCallback onTap,
+    bool isDark,
+    bool isTablet,
+  ) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
@@ -960,15 +1307,21 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     bool isDark,
     VoidCallback onTap,
   ) {
+    final size = MediaQuery.of(context).size;
+    final bool isMobile = size.width < 600;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 14 : 20,
+          vertical: isMobile ? 6 : 8,
+        ),
         decoration: BoxDecoration(
           color: isSelected
               ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: isSelected
                 ? Colors.transparent
@@ -980,7 +1333,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
         child: Text(
           label,
           style: GoogleFonts.inter(
-            fontSize: 12,
+            fontSize: isMobile ? 11 : 12,
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
             color: isSelected
                 ? Colors.white
@@ -1002,8 +1355,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       onTap: onTap,
       child: Container(
         padding: EdgeInsets.symmetric(
-          horizontal: isTablet ? 16 : 12,
-          vertical: isTablet ? 8 : 6,
+          horizontal: isTablet ? 16 : 10,
+          vertical: isTablet ? 8 : 5,
         ),
         decoration: BoxDecoration(
           color: isSelected
@@ -1011,7 +1364,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
               : (isDark
                     ? Colors.white.withValues(alpha: 0.05)
                     : Colors.black.withValues(alpha: 0.05)),
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: isSelected
                 ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
@@ -1021,7 +1374,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
         child: Text(
           label,
           style: GoogleFonts.inter(
-            fontSize: isTablet ? 12 : 11,
+            fontSize: isTablet ? 12 : 10,
             fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
             color: isSelected
                 ? Colors.white
@@ -1032,42 +1385,399 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     );
   }
 
-  Future<void> _saveOrder() async {
+  Widget _buildActiveOrderCheckoutPanel(
+    Size size,
+    bool isDark,
+    UserProfile? user,
+  ) {
+    final bool isMobile = size.width < 600;
+    final double panelWidth = isMobile ? size.width : min(360.0, size.width * 0.44);
+    final double panelHeight = isMobile ? size.height * 0.65 : size.height;
+
+    return Positioned(
+      right: 0,
+      bottom: 0,
+      top: isMobile ? null : 0,
+      left: isMobile ? 0 : null,
+      child: Container(
+        width: panelWidth,
+        height: panelHeight,
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 30,
+              offset: isMobile ? const Offset(0, -6) : const Offset(-8, 0),
+            ),
+          ],
+          borderRadius: isMobile
+              ? const BorderRadius.vertical(top: Radius.circular(24))
+              : const BorderRadius.only(
+                  topLeft: Radius.circular(24),
+                  bottomLeft: Radius.circular(24),
+                ),
+        ),
+        child: Column(
+          children: [
+            if (isMobile)
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 4),
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.2)
+                        : Colors.black.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            // Header
+            Padding(
+              padding: EdgeInsets.fromLTRB(16, isMobile ? 8 : 20, 12, 8),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.receipt_long_rounded,
+                    color: isDark ? AppColors.primaryAmber : AppColors.primaryOrange,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Active Order',
+                          style: GoogleFonts.inter(
+                            fontSize: 15, fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        Text(
+                          'Table: ${_selectedTable?.tableName}',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: isDark ? AppColors.primaryAmber : AppColors.primaryOrange,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                    onPressed: () => setState(() {
+                      _selectedTable = null;
+                      _checkoutDiscount = 0;
+                      _checkoutPaymentMode = 'CASH';
+                    }),
+                    style: IconButton.styleFrom(
+                      backgroundColor: isDark
+                          ? Colors.white.withValues(alpha: 0.05)
+                          : Colors.black.withValues(alpha: 0.05),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            // Bill details loaded from DB
+            Expanded(
+              child: FutureBuilder<Map<String, dynamic>?>(
+                future: SupabaseService.getOpenBillForTable(_selectedTable!.id),
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  if (snap.data == null) {
+                    return Center(
+                      child: Text(
+                        'No active order found',
+                        style: GoogleFonts.inter(
+                          color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                        ),
+                      ),
+                    );
+                  }
+                  final bill = snap.data!;
+                  final subtotal = (bill['subtotal'] as num?)?.toDouble() ?? 0.0;
+                  final cgst = (bill['cgst_amount'] as num?)?.toDouble() ?? 0.0;
+                  final sgst = (bill['sgst_amount'] as num?)?.toDouble() ?? 0.0;
+                  final rawTotal = subtotal + cgst + sgst;
+                  final discountAmt = rawTotal * (_checkoutDiscount / 100);
+                  final finalTotal = rawTotal - discountAmt;
+
+                  return StatefulBuilder(
+                    builder: (ctx, setLocal) => SingleChildScrollView(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Summary rows
+                          _summaryRow2('Subtotal', subtotal, isDark),
+                          if (cgst > 0) _summaryRow2('CGST', cgst, isDark),
+                          if (sgst > 0) _summaryRow2('SGST', sgst, isDark),
+                          const Divider(height: 24),
+
+                          // Discount field
+                          Text(
+                            'Discount %',
+                            style: GoogleFonts.inter(
+                              fontSize: 12, fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          SizedBox(
+                            height: 40,
+                            child: TextField(
+                              keyboardType: TextInputType.number,
+                              style: GoogleFonts.inter(fontSize: 14),
+                              decoration: InputDecoration(
+                                hintText: '0',
+                                filled: true,
+                                fillColor: isDark
+                                    ? Colors.white.withValues(alpha: 0.06)
+                                    : Colors.black.withValues(alpha: 0.04),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                  borderSide: BorderSide.none,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                                suffixText: '%',
+                              ),
+                              onChanged: (v) {
+                                final d = double.tryParse(v) ?? 0;
+                                setState(() => _checkoutDiscount = d.clamp(0, 100));
+                                setLocal(() {});
+                              },
+                            ),
+                          ),
+                          if (_checkoutDiscount > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: _summaryRow2('Discount', -discountAmt, isDark, isNeg: true),
+                            ),
+                          const SizedBox(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Total',
+                                style: GoogleFonts.inter(
+                                  fontSize: 16, fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              Text(
+                                '₹${finalTotal.toStringAsFixed(0)}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 20, fontWeight: FontWeight.w900,
+                                  color: isDark ? AppColors.primaryAmber : AppColors.primaryOrange,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 20),
+                          // Payment mode
+                          Text(
+                            'Payment Mode',
+                            style: GoogleFonts.inter(
+                              fontSize: 12, fontWeight: FontWeight.w600,
+                              color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: ['CASH', 'UPI', 'CARD'].map((mode) {
+                              final sel = _checkoutPaymentMode == mode;
+                              return Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(right: 6),
+                                  child: GestureDetector(
+                                    onTap: () => setState(() => _checkoutPaymentMode = mode),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(vertical: 10),
+                                      decoration: BoxDecoration(
+                                        color: sel
+                                            ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                                                .withValues(alpha: 0.15)
+                                            : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: sel
+                                              ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                                              : Colors.grey.withValues(alpha: 0.3),
+                                          width: sel ? 1.5 : 1,
+                                        ),
+                                      ),
+                                      child: Text(
+                                        mode,
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 11, fontWeight: FontWeight.w700,
+                                          color: sel
+                                              ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                                              : (isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 20),
+                          // Checkout button
+                          SafeArea(
+                            top: false,
+                            child: SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.success,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  elevation: 0,
+                                ),
+                                onPressed: () => _doCheckout(finalTotal),
+                                child: Text(
+                                  'COMPLETE PAYMENT',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13, fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      )
+      .animate()
+      .slideY(
+        begin: isMobile ? 1.0 : 0.0, end: 0.0,
+        duration: 350.ms, curve: Curves.easeOutCubic,
+      )
+      .slideX(
+        begin: isMobile ? 0.0 : 1.0, end: 0.0,
+        duration: 350.ms, curve: Curves.easeOutCubic,
+      ),
+    );
+  }
+
+  Widget _summaryRow2(String label, double amount, bool isDark, {bool isNeg = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: GoogleFonts.inter(fontSize: 13,
+            color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted)),
+          Text(
+            '${isNeg ? '-' : ''}₹${amount.abs().toStringAsFixed(0)}',
+            style: GoogleFonts.inter(
+              fontSize: 13, fontWeight: FontWeight.w600,
+              color: isNeg ? AppColors.error : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _doCheckout(double finalTotal) async {
     if (_selectedTable == null) return;
-    final cart = ref.read(cartProvider(_selectedTable!.id));
-    if (cart.isEmpty) return;
-
-    setState(
-      () => _isProcessingAI = true,
-    ); // Using this as a generic loading state
-
+    setState(() => _isProcessingAI = true);
     try {
-      // 1. Create or get table session
-      // For now, we'll use a simplified logic to 'occupy' the table
-      // In a full implementation, we'd create a table_session and bill_master/bill_items in 'open' status
-
-      // Placeholder for actual database call
-      await Future.delayed(const Duration(seconds: 1));
-
+      await SupabaseService.checkoutTable(
+        tableId: _selectedTable!.id,
+        paymentMode: _checkoutPaymentMode,
+        discountPercent: _checkoutDiscount,
+      );
+      ref.invalidate(tablesProvider(widget.companyId));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Order saved for ${_selectedTable?.tableName}'),
+            content: Text(
+              'Payment complete — ${_selectedTable?.tableName} • ₹${finalTotal.toStringAsFixed(0)}',
+            ),
             backgroundColor: AppColors.success,
           ),
         );
         setState(() {
           _selectedTable = null;
+          _checkoutDiscount = 0;
+          _checkoutPaymentMode = 'CASH';
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Checkout error: $e'), backgroundColor: AppColors.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessingAI = false);
+    }
+  }
+
+  Future<void> _saveOrder() async {
+    if (_selectedTable == null) return;
+    final cart = ref.read(cartProvider(_selectedTable!.id));
+    if (cart.isEmpty) return;
+
+    final user = ref.read(authStateProvider).value;
+    if (user == null) return;
+
+    setState(() => _isProcessingAI = true);
+
+    try {
+      // Creates table_session + open bill + bill_items + KOT in one flow
+      await SupabaseService.saveOrderWithKot(
+        companyId: user.companyId,
+        tableId: _selectedTable!.id,
+        openedBy: user.id,
+        cart: cart,
+      );
+
+      // Clear cart, refresh table list so occupied status shows from DB
+      ref.read(cartProvider(_selectedTable!.id).notifier).clear();
+      ref.invalidate(tablesProvider(widget.companyId));
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('KOT sent to kitchen — ${_selectedTable?.tableName}'),
+            backgroundColor: AppColors.success,
+          ),
+        );
+        setState(() {
+          _selectedTable = null;
+          _selectedCategory = null;
           _showCartTab = false;
+          _searchQuery = '';
+          _searchController.clear();
         });
       }
     } catch (e, st) {
-      debugPrint('SAVE_ORDER_ERROR: $e');
-      debugPrint(st.toString());
+      debugPrint('SAVE_ORDER_ERROR: $e\n$st');
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error saving order: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _isProcessingAI = false);
@@ -1200,20 +1910,25 @@ class _TableCard extends ConsumerWidget {
                 ),
               ),
               Padding(
-                padding: EdgeInsets.all(isTablet ? 14 : 10),
+                padding: EdgeInsets.all(isTablet ? 14 : 8),
                 child: Column(
                   children: [
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // Table Icon Section
-                        _buildTableIcon(table, isDark, status == 'OCCUPIED'),
+                        _buildTableIcon(
+                          table,
+                          isDark,
+                          status == 'OCCUPIED',
+                          isTablet,
+                        ),
                         const Spacer(),
                         // Status Badge
                         Container(
                           padding: EdgeInsets.symmetric(
-                            horizontal: isTablet ? 14 : 8,
-                            vertical: isTablet ? 7 : 4,
+                            horizontal: isTablet ? 14 : 6,
+                            vertical: isTablet ? 7 : 3,
                           ),
                           decoration: BoxDecoration(
                             color: statusBgColor,
@@ -1256,7 +1971,11 @@ class _TableCard extends ConsumerWidget {
                     // Bottom row with Details
                     Row(
                       children: [
-                        _buildDetailLabel(_sizeLabel.toUpperCase(), isDark, isTablet),
+                        _buildDetailLabel(
+                          _sizeLabel.toUpperCase(),
+                          isDark,
+                          isTablet,
+                        ),
                         _buildSeparator(isDark, isTablet),
                         _buildDetailLabel(
                           '${table.seatingCapacity} PAX',
@@ -1266,8 +1985,8 @@ class _TableCard extends ConsumerWidget {
                         const Spacer(),
                         Container(
                           padding: EdgeInsets.symmetric(
-                            horizontal: isTablet ? 10 : 6,
-                            vertical: isTablet ? 4 : 2,
+                            horizontal: isTablet ? 10 : 5,
+                            vertical: isTablet ? 4 : 1.5,
                           ),
                           decoration: BoxDecoration(
                             color:
@@ -1325,22 +2044,27 @@ Widget _buildDetailLabel(String text, bool isDark, bool isTablet) {
   );
 }
 
-Widget _buildTableIcon(CafeTable table, bool isDark, bool isOccupied) {
+Widget _buildTableIcon(
+  CafeTable table,
+  bool isDark,
+  bool isOccupied,
+  bool isTablet,
+) {
   final capacity = table.seatingCapacity;
 
   return SizedBox(
-    width: 60,
-    height: 50,
+    width: isTablet ? 60 : 44,
+    height: isTablet ? 50 : 36,
     child: Stack(
       alignment: Alignment.center,
       children: [
         // Dynamic Chairs placement
-        ..._buildDynamicChairs(capacity, isDark, isOccupied),
+        ..._buildDynamicChairs(capacity, isDark, isOccupied, isTablet),
 
         // The Table Surface
         Container(
-              width: 38,
-              height: 28,
+              width: isTablet ? 38 : 28,
+              height: isTablet ? 28 : 20,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
@@ -1355,7 +2079,7 @@ Widget _buildTableIcon(CafeTable table, bool isDark, bool isOccupied) {
                           Colors.black.withValues(alpha: 0.02),
                         ],
                 ),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(isTablet ? 8 : 6),
                 border: Border.all(
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.15)
@@ -1373,7 +2097,7 @@ Widget _buildTableIcon(CafeTable table, bool isDark, bool isOccupied) {
               child: Text(
                 table.tableNumber,
                 style: GoogleFonts.inter(
-                  fontSize: 10,
+                  fontSize: isTablet ? 10 : 8,
                   fontWeight: FontWeight.w900,
                   letterSpacing: -0.5,
                   color: isDark ? Colors.white : Colors.black87,
@@ -1391,26 +2115,53 @@ Widget _buildTableIcon(CafeTable table, bool isDark, bool isOccupied) {
   ).animate().fadeIn(duration: 400.ms).scale(begin: const Offset(0.8, 0.8));
 }
 
-List<Widget> _buildDynamicChairs(int capacity, bool isDark, bool isOccupied) {
+List<Widget> _buildDynamicChairs(
+  int capacity,
+  bool isDark,
+  bool isOccupied,
+  bool isTablet,
+) {
   final List<Widget> chairs = [];
 
   // Simple distribution logic:
   // Left & Right (always for 2+)
-  chairs.add(Positioned(left: 0, child: _buildChair(isDark, isOccupied, 0)));
-  chairs.add(Positioned(right: 0, child: _buildChair(isDark, isOccupied, 1)));
+  chairs.add(
+    Positioned(
+      left: 0,
+      child: _buildChair(isDark, isOccupied, 0, isTablet: isTablet),
+    ),
+  );
+  chairs.add(
+    Positioned(
+      right: 0,
+      child: _buildChair(isDark, isOccupied, 1, isTablet: isTablet),
+    ),
+  );
 
   // Top & Bottom (for 4+)
   if (capacity >= 4) {
     chairs.add(
       Positioned(
         top: 0,
-        child: _buildChair(isDark, isOccupied, 2, horizontal: true),
+        child: _buildChair(
+          isDark,
+          isOccupied,
+          2,
+          horizontal: true,
+          isTablet: isTablet,
+        ),
       ),
     );
     chairs.add(
       Positioned(
         bottom: 0,
-        child: _buildChair(isDark, isOccupied, 3, horizontal: true),
+        child: _buildChair(
+          isDark,
+          isOccupied,
+          3,
+          horizontal: true,
+          isTablet: isTablet,
+        ),
       ),
     );
   }
@@ -1419,13 +2170,17 @@ List<Widget> _buildDynamicChairs(int capacity, bool isDark, bool isOccupied) {
   if (capacity >= 6) {
     // Offset slightly from center
     chairs.add(
-      Positioned(left: 0, top: 8, child: _buildChair(isDark, isOccupied, 4)),
+      Positioned(
+        left: 0,
+        top: isTablet ? 8 : 6,
+        child: _buildChair(isDark, isOccupied, 4, isTablet: isTablet),
+      ),
     );
     chairs.add(
       Positioned(
         right: 0,
-        bottom: 8,
-        child: _buildChair(isDark, isOccupied, 5),
+        bottom: isTablet ? 8 : 6,
+        child: _buildChair(isDark, isOccupied, 5, isTablet: isTablet),
       ),
     );
   }
@@ -1438,10 +2193,11 @@ Widget _buildChair(
   bool isOccupied,
   int index, {
   bool horizontal = false,
+  required bool isTablet,
 }) {
   return Container(
-        width: horizontal ? 12 : 6,
-        height: horizontal ? 6 : 12,
+        width: horizontal ? (isTablet ? 12 : 8) : (isTablet ? 6 : 4),
+        height: horizontal ? (isTablet ? 6 : 4) : (isTablet ? 12 : 8),
         decoration: BoxDecoration(
           color: isDark
               ? Colors.white.withValues(alpha: isOccupied ? 0.3 : 0.1)
@@ -1469,8 +2225,6 @@ Widget _buildChair(
       );
 }
 
-
-
 class _CompactItemTile extends StatelessWidget {
   final Item master;
   final ItemVariant? variant;
@@ -1490,10 +2244,11 @@ class _CompactItemTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isTablet = size.width > 800;
+    final isMobile = size.width < 600;
 
     final name =
         (variant == null || variant!.variantName.toLowerCase() == 'default')
-        ? master.itemName   
+        ? master.itemName
         : variant!.variantName;
     final price = variant?.baseRate ?? master.baseRate;
     final imageUrl = variant?.imageUrl ?? master.imageUrl;
@@ -1502,13 +2257,13 @@ class _CompactItemTile extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.all(8),
+          padding: EdgeInsets.all(isMobile ? 4 : 8),
           decoration: BoxDecoration(
             color: isDark ? AppColors.darkCard : AppColors.lightCard,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(isMobile ? 10 : 12),
             border: Border.all(
               color: cartCount > 0
                   ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
@@ -1537,7 +2292,7 @@ class _CompactItemTile extends StatelessWidget {
                   children: [
                     Positioned.fill(
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                         child: imageUrl != null && imageUrl.isNotEmpty
                             ? Image.network(
                                 imageUrl,
@@ -1551,18 +2306,18 @@ class _CompactItemTile extends StatelessWidget {
                     ),
                     if (cartCount > 0)
                       Positioned(
-                        top: 4,
-                        right: 4,
+                        top: 2,
+                        right: 2,
                         child: Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
+                            horizontal: 5,
+                            vertical: 1.5,
                           ),
                           decoration: BoxDecoration(
                             color: isDark
                                 ? AppColors.primaryAmber
                                 : AppColors.primaryOrange,
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(6),
                             boxShadow: [
                               BoxShadow(
                                 color: Colors.black.withValues(alpha: 0.2),
@@ -1573,7 +2328,7 @@ class _CompactItemTile extends StatelessWidget {
                           child: Text(
                             '$cartCount',
                             style: GoogleFonts.inter(
-                              fontSize: isTablet ? 8 : 10,
+                              fontSize: isMobile ? 8 : (isTablet ? 8 : 10),
                               fontWeight: FontWeight.w800,
                               color: Colors.white,
                             ),
@@ -1583,11 +2338,11 @@ class _CompactItemTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(height: 6),
+              SizedBox(height: isMobile ? 2 : 4),
               Text(
                 name,
                 style: GoogleFonts.inter(
-                  fontSize: isTablet ? 11 : 13,
+                  fontSize: isMobile ? 9 : 12,
                   fontWeight: FontWeight.w700,
                 ),
                 textAlign: TextAlign.center,
@@ -1597,7 +2352,7 @@ class _CompactItemTile extends StatelessWidget {
               Text(
                 '₹${price.toStringAsFixed(0)}',
                 style: GoogleFonts.inter(
-                  fontSize: isTablet ? 8 : 12,
+                  fontSize: isMobile ? 8 : 11,
                   fontWeight: FontWeight.w800,
                   color: isDark
                       ? AppColors.primaryAmber
@@ -1646,7 +2401,7 @@ class _TableBillingSheetState extends ConsumerState<_TableBillingSheet> {
         openedBy: widget.user.id,
       );
 
-      // 2. Create Bill
+      // 2. Create Bill (also frees the table in DB)
       await SupabaseService.createBill(
         companyId: widget.user.companyId,
         billedBy: widget.user.id,
@@ -1675,9 +2430,10 @@ class _TableBillingSheetState extends ConsumerState<_TableBillingSheet> {
             .toList(),
       );
 
-      // 3. Clear Table Cart
+      // 3. Clear Table Cart and refresh table grid
       ref.read(cartProvider(widget.table.id).notifier).clear();
       ref.read(discountProvider.notifier).reset();
+      ref.invalidate(tablesProvider(widget.user.companyId));
 
       if (mounted) {
         Navigator.pop(context); // Close sheet

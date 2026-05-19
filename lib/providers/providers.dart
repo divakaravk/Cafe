@@ -247,6 +247,15 @@ class SelectedTableNotifier extends Notifier<CafeTable?> {
   void select(CafeTable? table) => state = table;
 }
 
+// ─── ACTIVE KOTS ─────────────────────────────────────────
+final activeKotsProvider = FutureProvider.family<List<KotMaster>, String>((
+  ref,
+  companyId,
+) async {
+  final res = await SupabaseService.getActiveKots(companyId);
+  return res.map((e) => KotMaster.fromJson(e)).toList();
+});
+
 // ─── BILLS ───────────────────────────────────────────────
 final billsProvider = FutureProvider.family<List<Bill>, String>((
   ref,

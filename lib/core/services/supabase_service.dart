@@ -244,12 +244,28 @@ class SupabaseService {
 
   // ─── TABLES ────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> getTables(String companyId) async {
-    final res = await client
+    final tables = await client
         .from('table_master')
         .select()
         .eq('company_id', companyId)
         .order('table_number');
-    return List<Map<String, dynamic>>.from(res);
+
+    // Fetch tables that have an open session to determine occupancy
+    final openSessions = await client
+        .from('table_session')
+        .select('table_id')
+        .eq('company_id', companyId)
+        .eq('status', 'open');
+
+    final occupiedIds = {
+      for (final s in openSessions as List) s['table_id'] as String,
+    };
+
+    return (tables as List).map((t) {
+      final map = Map<String, dynamic>.from(t as Map);
+      map['is_occupied'] = occupiedIds.contains(map['id']);
+      return map;
+    }).toList();
   }
 
   static Future<void> updateTableStatus(String tableId, String status) async {
@@ -446,14 +462,13 @@ class SupabaseService {
 
     await client.from('bill_item').insert(itemsToInsert);
 
-    // If table session exists, update it
+    // Close table session and free the table
     if (tableSessionId != null) {
       await client
           .from('table_session')
           .update({'status': 'billed', 'closed_at': now.toIso8601String()})
           .eq('id', tableSessionId);
     }
-
     return bill;
   }
 
@@ -476,6 +491,263 @@ class SupabaseService {
 
     final res = await query.order('bill_date', ascending: false);
     return List<Map<String, dynamic>>.from(res);
+  }
+
+  // ─── KOT ────────────────────────────────────────────────
+  static Future<String> _generateKotNumber(String companyId) async {
+    final now = DateTime.now();
+    final dateStr =
+        '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+    final latest = await client
+        .from('kot_master')
+        .select('kot_number')
+        .eq('company_id', companyId)
+        .ilike('kot_number', 'KOT/$dateStr/%')
+        .order('created_at', ascending: false)
+        .limit(1);
+    int seq = 1;
+    if ((latest as List).isNotEmpty) {
+      final parts = (latest[0]['kot_number'] as String).split('/');
+      if (parts.length == 3) seq = (int.tryParse(parts[2]) ?? 0) + 1;
+    }
+    return 'KOT/$dateStr/${seq.toString().padLeft(3, '0')}';
+  }
+
+  /// Returns open bill info for a table (session_id, bill_id, total_amount, subtotal)
+  static Future<Map<String, dynamic>?> getOpenBillForTable(String tableId) async {
+    final sessions = await client
+        .from('table_session')
+        .select('id')
+        .eq('table_id', tableId)
+        .eq('status', 'open')
+        .limit(1);
+    if ((sessions as List).isEmpty) return null;
+    final sessionId = sessions[0]['id'] as String;
+
+    final bills = await client
+        .from('bill_master')
+        .select('id, subtotal, total_amount, cgst_amount, sgst_amount')
+        .eq('table_session_id', sessionId)
+        .eq('status', 'open')
+        .limit(1);
+    if ((bills as List).isEmpty) return {'session_id': sessionId, 'total_amount': 0.0};
+    final bill = Map<String, dynamic>.from(bills[0]);
+    bill['session_id'] = sessionId;
+    return bill;
+  }
+
+  /// Finalizes an open bill and closes the session (checkout)
+  static Future<void> checkoutTable({
+    required String tableId,
+    required String paymentMode,
+    double discountPercent = 0,
+  }) async {
+    final billData = await getOpenBillForTable(tableId);
+    if (billData == null) throw Exception('No open order found for this table');
+    final sessionId = billData['session_id'] as String;
+    final billId = billData['id'] as String?;
+    if (billId == null) throw Exception('No open bill found for this table');
+
+    final rawTotal = (billData['total_amount'] as num?)?.toDouble() ?? 0.0;
+    final discountAmount = rawTotal * (discountPercent / 100);
+    final finalTotal = rawTotal - discountAmount;
+    final now = DateTime.now();
+
+    await client.from('bill_master').update({
+      'status': 'paid',
+      'payment_mode': paymentMode.toLowerCase(),
+      'discount_amount': discountAmount,
+      'total_amount': finalTotal,
+    }).eq('id', billId);
+
+    await client.from('table_session').update({
+      'status': 'billed',
+      'closed_at': now.toIso8601String(),
+    }).eq('id', sessionId);
+  }
+
+  /// Creates (or reuses) table_session → open bill_master + bill_items → kot_master + kot_items
+  static Future<void> saveOrderWithKot({
+    required String companyId,
+    required String tableId,
+    required String openedBy,
+    required List<dynamic> cart, // List<CartItem>
+  }) async {
+    // 1. Reuse existing open session, or create a new one
+    final existingSessions = await client
+        .from('table_session')
+        .select('id')
+        .eq('company_id', companyId)
+        .eq('table_id', tableId)
+        .eq('status', 'open')
+        .limit(1);
+
+    String sessionId;
+    if ((existingSessions as List).isNotEmpty) {
+      sessionId = existingSessions[0]['id'] as String;
+    } else {
+      final session = await client
+          .from('table_session')
+          .insert({
+            'company_id': companyId,
+            'table_id': tableId,
+            'opened_by': openedBy,
+            'status': 'open',
+          })
+          .select()
+          .single();
+      sessionId = session['id'] as String;
+    }
+
+    // 2. Calculate taxes and build bill_items payload
+    double subtotal = 0, totalCgst = 0, totalSgst = 0;
+    final billItemsData = (cart as List).map((ci) {
+      final cartItem = ci as dynamic;
+      final qty = (cartItem.qty as int).toDouble();
+      final rate = (cartItem.rate as double);
+      final gstRate = (cartItem.variant?.gstRate ?? cartItem.item.gstRate) as double;
+      final isTaxable = cartItem.item.isTaxable as bool;
+      double cgst = 0, sgst = 0;
+      if (isTaxable && gstRate > 0) {
+        final tax = qty * rate * (gstRate / 100);
+        cgst = tax / 2;
+        sgst = tax / 2;
+        totalCgst += cgst;
+        totalSgst += sgst;
+      }
+      subtotal += qty * rate;
+      return {
+        'item_id': cartItem.item.id as String,
+        'variant_id': cartItem.variant?.id as String?,
+        'item_name_snapshot': cartItem.itemName as String,
+        'rate_snapshot': rate,
+        'qty': qty,
+        'gross_amount': qty * rate,
+        'discount_amount': 0.0,
+        'hsn_code_snapshot': (cartItem.variant?.hsnCode ?? cartItem.item.hsnCode) as String?,
+        'gst_rate_snapshot': gstRate,
+        'cgst_amount': cgst,
+        'sgst_amount': sgst,
+        'igst_amount': 0.0,
+        'net_amount': qty * rate + cgst + sgst,
+        'notes': cartItem.notes as String?,
+      };
+    }).toList();
+
+    // 3. Reuse existing open bill, or create new one
+    final existingBills = await client
+        .from('bill_master')
+        .select('id, subtotal, cgst_amount, sgst_amount, total_amount')
+        .eq('table_session_id', sessionId)
+        .eq('status', 'open')
+        .limit(1);
+
+    String billId;
+    if ((existingBills as List).isNotEmpty) {
+      billId = existingBills[0]['id'] as String;
+      final prevSubtotal = (existingBills[0]['subtotal'] as num).toDouble();
+      final prevCgst = (existingBills[0]['cgst_amount'] as num).toDouble();
+      final prevSgst = (existingBills[0]['sgst_amount'] as num).toDouble();
+      await client.from('bill_master').update({
+        'subtotal': prevSubtotal + subtotal,
+        'taxable_amount': prevSubtotal + subtotal,
+        'cgst_amount': prevCgst + totalCgst,
+        'sgst_amount': prevSgst + totalSgst,
+        'total_amount': prevSubtotal + subtotal + prevCgst + totalCgst + prevSgst + totalSgst,
+      }).eq('id', billId);
+    } else {
+      final billNumber = await _generateBillNumber(companyId);
+      final bill = await client
+          .from('bill_master')
+          .insert({
+            'company_id': companyId,
+            'billed_by': openedBy,
+            'table_session_id': sessionId,
+            'bill_number': billNumber,
+            'bill_type': 'dine_in',
+            'subtotal': subtotal,
+            'discount_amount': 0,
+            'taxable_amount': subtotal,
+            'cgst_amount': totalCgst,
+            'sgst_amount': totalSgst,
+            'igst_amount': 0,
+            'total_amount': subtotal + totalCgst + totalSgst,
+            'payment_mode': 'cash',
+            'status': 'open',
+          })
+          .select()
+          .single();
+      billId = bill['id'] as String;
+    }
+
+    // 4. Insert bill_items and retrieve IDs
+    for (final item in billItemsData) {
+      item['bill_id'] = billId;
+    }
+    final insertedItems = await client
+        .from('bill_item')
+        .insert(billItemsData)
+        .select('id, item_id, variant_id');
+
+    // 5. Create kot_master
+    final kotNumber = await _generateKotNumber(companyId);
+    final kot = await client
+        .from('kot_master')
+        .insert({
+          'company_id': companyId,
+          'bill_id': billId,
+          'table_session_id': sessionId,
+          'kot_number': kotNumber,
+          'status': 'pending',
+          'created_by': openedBy,
+        })
+        .select()
+        .single();
+    final kotId = kot['id'] as String;
+
+    // 6. Create kot_items linked to bill_items
+    final cartList = cart as List;
+    final kotItems = (insertedItems as List).map((bi) {
+      final idx = cartList.indexWhere((ci) {
+        final c = ci as dynamic;
+        return c.item.id == bi['item_id'] && c.variant?.id == bi['variant_id'];
+      });
+      final cartItem = idx >= 0 ? cartList[idx] as dynamic : null;
+      return {
+        'kot_id': kotId,
+        'bill_item_id': bi['id'],
+        'qty': cartItem != null ? (cartItem.qty as num).toDouble() : 1.0,
+        'notes': cartItem != null ? cartItem.notes : null,
+        'status': 'pending',
+      };
+    }).toList();
+    await client.from('kot_item').insert(kotItems);
+  }
+
+  static Future<List<Map<String, dynamic>>> getActiveKots(
+    String companyId,
+  ) async {
+    final res = await client
+        .from('kot_master')
+        .select(
+          '*, table_session(table_master(table_number)), '
+          'kot_item(*, bill_item(item_name_snapshot))',
+        )
+        .eq('company_id', companyId)
+        .not('status', 'in', '(done,cancelled)')
+        .order('created_at');
+    return List<Map<String, dynamic>>.from(res);
+  }
+
+  static Future<void> updateKotStatus(String kotId, String status) async {
+    await client.from('kot_master').update({'status': status}).eq('id', kotId);
+  }
+
+  static Future<void> updateKotItemStatus(
+    String kotItemId,
+    String status,
+  ) async {
+    await client.from('kot_item').update({'status': status}).eq('id', kotItemId);
   }
 
   // ─── UI SETTINGS ───────────────────────────────────────

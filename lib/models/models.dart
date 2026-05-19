@@ -395,6 +395,7 @@ class CafeTable {
   final String? section;
   final int seatingCapacity;
   final bool isActive;
+  final bool isOccupied;
 
   CafeTable({
     required this.id,
@@ -403,14 +404,12 @@ class CafeTable {
     this.section,
     this.seatingCapacity = 2,
     this.isActive = true,
+    this.isOccupied = false,
   });
 
-  // Compatibility getters
   String get tableName => tableNumber;
-  String get status =>
-      'FREE'; // Placeholder: V2 uses TABLE_SESSION to determine this
-  bool get isFree => true; // Placeholder
-  bool get isOccupied => false; // Placeholder
+  String get status => isOccupied ? 'OCCUPIED' : 'FREE';
+  bool get isFree => !isOccupied;
 
   factory CafeTable.fromJson(Map<String, dynamic> json) => CafeTable(
     id: json['id'] as String,
@@ -419,6 +418,7 @@ class CafeTable {
     section: json['section'] as String?,
     seatingCapacity: json['seating_capacity'] as int? ?? 2,
     isActive: json['is_active'] as bool? ?? true,
+    isOccupied: json['is_occupied'] as bool? ?? false,
   );
 }
 
@@ -599,6 +599,108 @@ class BillItem {
     cgstAmount: (json['cgst_amount'] as num?)?.toDouble() ?? 0,
     sgstAmount: (json['sgst_amount'] as num?)?.toDouble() ?? 0,
     igstAmount: (json['igst_amount'] as num?)?.toDouble() ?? 0,
+  );
+}
+
+// ─── KOT ─────────────────────────────────────────────────
+
+class KotStatus {
+  static const String pending   = 'pending';
+  static const String inProgress = 'in_progress';
+  static const String done      = 'done';
+  static const String cancelled = 'cancelled';
+}
+
+class KotItemStatus {
+  static const String pending    = 'pending';
+  static const String inProgress = 'in_progress';
+  static const String done       = 'done';
+  static const String voided     = 'void';
+}
+
+class KotMaster {
+  final String id;
+  final String companyId;
+  final String billId;
+  final String? tableSessionId;
+  final String? tableName;
+  final String kotNumber;
+  String status;
+  final String createdBy;
+  final bool isPrinted;
+  final List<KotItem> items;
+  final DateTime? createdAt;
+
+  KotMaster({
+    required this.id,
+    required this.companyId,
+    required this.billId,
+    this.tableSessionId,
+    this.tableName,
+    required this.kotNumber,
+    this.status = KotStatus.pending,
+    required this.createdBy,
+    this.isPrinted = false,
+    this.items = const [],
+    this.createdAt,
+  });
+
+  bool get allDone =>
+      items.isNotEmpty &&
+      items.every((i) => i.status == KotItemStatus.done || i.status == KotItemStatus.voided);
+
+  factory KotMaster.fromJson(Map<String, dynamic> json) => KotMaster(
+    id: json['id'] as String,
+    companyId: json['company_id'] as String,
+    billId: json['bill_id'] as String,
+    tableSessionId: json['table_session_id'] as String?,
+    tableName: json['table_session'] != null &&
+            json['table_session']['table_master'] != null
+        ? json['table_session']['table_master']['table_number'] as String?
+        : null,
+    kotNumber: json['kot_number'] as String? ?? '',
+    status: json['status'] as String? ?? KotStatus.pending,
+    createdBy: json['created_by'] as String? ?? '',
+    isPrinted: json['is_printed'] as bool? ?? false,
+    items: (json['kot_item'] as List<dynamic>?)
+            ?.map((e) => KotItem.fromJson(e as Map<String, dynamic>))
+            .toList() ??
+        [],
+    createdAt: json['created_at'] != null
+        ? DateTime.parse(json['created_at'] as String)
+        : null,
+  );
+}
+
+class KotItem {
+  final String id;
+  final String kotId;
+  final String billItemId;
+  final String itemNameSnapshot; // from bill_item join
+  final int qty;
+  final String? notes;
+  String status;
+
+  KotItem({
+    required this.id,
+    required this.kotId,
+    required this.billItemId,
+    required this.itemNameSnapshot,
+    this.qty = 1,
+    this.notes,
+    this.status = KotItemStatus.pending,
+  });
+
+  factory KotItem.fromJson(Map<String, dynamic> json) => KotItem(
+    id: json['id'] as String,
+    kotId: json['kot_id'] as String,
+    billItemId: json['bill_item_id'] as String,
+    itemNameSnapshot: json['bill_item'] != null
+        ? (json['bill_item']['item_name_snapshot'] as String? ?? '')
+        : '',
+    qty: (json['qty'] as num?)?.toInt() ?? 1,
+    notes: json['notes'] as String?,
+    status: json['status'] as String? ?? KotItemStatus.pending,
   );
 }
 

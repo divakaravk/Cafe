@@ -15,6 +15,7 @@ import 'features/reports/bills_screen.dart';
 import 'features/admin/presentation/company_master_screen.dart';
 import 'features/admin/presentation/user_master_screen.dart';
 import 'features/admin/presentation/item_master_screen.dart';
+import 'features/kitchen/kitchen_screen.dart';
 
 /// Main app shell — switches between login and POS based on auth state
 class HomeShell extends ConsumerWidget {
@@ -49,17 +50,24 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   bool get _isWaiter => widget.user.isWaiter;
+  bool get _isKitchen => widget.user.isKitchen;
 
   @override
   Widget build(BuildContext context) {
     final selectedTheme = ref.watch(selectedUiThemeProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    // Kitchen role: show only the KOT/kitchen screen
+    if (_isKitchen) {
+      return Scaffold(
+        drawer: _buildUnifiedDrawer(context, isDark),
+        body: KitchenScreen(companyId: widget.user.companyId),
+      );
+    }
+
     final List<Widget> screens;
     if (_isWaiter) {
-      screens = [
-        TablesScreen(companyId: widget.user.companyId),
-      ];
+      screens = [TablesScreen(companyId: widget.user.companyId)];
     } else {
       Widget posScreen;
       switch (selectedTheme) {
@@ -90,7 +98,11 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
   }
 
   Widget _buildUnifiedDrawer(BuildContext context, bool isDark) {
+    final mediaQuery = MediaQuery.of(context);
+    final isMobile = mediaQuery.size.width < 600;
+
     return Drawer(
+      width: isMobile ? 240.0 : 280.0,
       backgroundColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.only(
@@ -135,7 +147,16 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                if (_isWaiter) ...[
+                if (_isKitchen) ...[
+                  _buildDrawerSection('KITCHEN', isDark),
+                  _buildDrawerItem(
+                    Icons.restaurant_rounded,
+                    'Kitchen Display',
+                    () => Navigator.pop(context),
+                    isDark,
+                    isSelected: true,
+                  ),
+                ] else if (_isWaiter) ...[
                   _buildDrawerSection('NAVIGATION', isDark),
                   _buildDrawerItem(
                     Icons.table_restaurant_rounded,
@@ -192,6 +213,19 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                         context,
                         MaterialPageRoute(
                           builder: (_) => const CompanyMasterScreen(),
+                        ),
+                      ),
+                      isDark,
+                    ),
+                    _buildDrawerItem(
+                      Icons.soup_kitchen_rounded,
+                      'Kitchen Monitor',
+                      () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => KitchenScreen(
+                            companyId: widget.user.companyId,
+                          ),
                         ),
                       ),
                       isDark,
