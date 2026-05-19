@@ -21,11 +21,11 @@ class SupabaseService {
   }) async {
     // Search by username or email (case-insensitive)
     final res = await client
-        .from('user_master')
+        .from('user_profiles')
         .select()
-        .or('username.ilike.$input,email.ilike.$input')
-        .eq('password_hash', password)
-        .eq('is_active', true)
+        .or('username.ilike.$input,user_email.ilike.$input')
+        .eq('password', password)
+        .eq('user_active', true)
         .maybeSingle();
 
     if (res == null) {
@@ -48,7 +48,7 @@ class SupabaseService {
   // ─── PROFILE ───────────────────────────────────────────
   static Future<Map<String, dynamic>?> getProfile(String userId) async {
     final res = await client
-        .from('user_master')
+        .from('user_profiles')
         .select()
         .eq('id', userId)
         .maybeSingle();
@@ -59,10 +59,10 @@ class SupabaseService {
     String companyId,
   ) async {
     final res = await client
-        .from('user_master')
+        .from('user_profiles')
         .select()
         .eq('company_id', companyId)
-        .order('full_name');
+        .order('user_name');
     return List<Map<String, dynamic>>.from(res);
   }
 
@@ -82,7 +82,7 @@ class SupabaseService {
   }) async {
     if (isNew) {
       // 1. Insert User
-      await client.from('user_master').insert(userData);
+      await client.from('user_profiles').insert(userData);
 
       // 2. Insert Permissions
       permissionData['user_id'] = userData['id'];
@@ -90,7 +90,7 @@ class SupabaseService {
     } else {
       // 1. Update User
       await client
-          .from('user_master')
+          .from('user_profiles')
           .update(userData)
           .eq('id', userData['id']);
 
@@ -262,6 +262,7 @@ class SupabaseService {
   static Future<Map<String, dynamic>> createOrder({
     required String companyId,
     String? tableId,
+    String? openedBy,
     String orderType = 'DINING',
   }) async {
     final res = await client
@@ -269,6 +270,7 @@ class SupabaseService {
         .insert({
           'company_id': companyId,
           'table_id': tableId,
+          'opened_by': openedBy,
           'status': 'open',
         })
         .select()
@@ -301,6 +303,56 @@ class SupabaseService {
     await client.from('orders').update({'status': 'CLOSED'}).eq('id', orderId);
   }
 
+  static Future<String> _generateBillNumber(String companyId) async {
+    final now = DateTime.now();
+
+    // Financial Year Calculation (April to March)
+    String fy;
+    if (now.month >= 4) {
+      fy = "${now.year}-${(now.year + 1) % 100}";
+    } else {
+      fy = "${now.year - 1}-${(now.year) % 100}";
+    }
+
+    try {
+      // Fetch company code (prefix)
+      final companyRes = await client
+          .from('company_master')
+          .select('company_code')
+          .eq('id', companyId)
+          .maybeSingle();
+
+      String prefix = companyRes?['company_code'] ?? 'POS';
+      if (prefix.isEmpty) prefix = 'POS';
+
+      // Find the latest bill number for this company and FY
+      // We order by bill_date to get the most recent one, which should have the highest sequence
+      final latestBillRes = await client
+          .from('bill_master')
+          .select('bill_number')
+          .eq('company_id', companyId)
+          .ilike('bill_number', '$prefix/$fy/%')
+          .order('bill_date', ascending: false)
+          .limit(1);
+
+      int sequence = 1;
+      if (latestBillRes != null && (latestBillRes as List).isNotEmpty) {
+        final latestBillNumber = latestBillRes[0]['bill_number'] as String;
+        final parts = latestBillNumber.split('/');
+        if (parts.length == 3) {
+          final lastPart = parts[2];
+          // Try to parse the sequence, default to current bills count if parsing fails
+          sequence = (int.tryParse(lastPart) ?? 0) + 1;
+        }
+      }
+
+      return '$prefix/$fy/${sequence.toString().padLeft(3, '0')}';
+    } catch (e) {
+      // Fallback in case of any database errors
+      return 'BILL/${now.year}${now.month}${now.day}/${now.millisecondsSinceEpoch.toString().substring(now.millisecondsSinceEpoch.toString().length - 4)}';
+    }
+  }
+
   // ─── BILLS (BILL_MASTER) ─────────────────────────────
   static Future<Map<String, dynamic>> createBill({
     required String companyId,
@@ -315,9 +367,9 @@ class SupabaseService {
     String billType = 'dine_in',
     required List<Map<String, dynamic>> billItems,
   }) async {
-    // Generate bill number
+    // Generate GST compliant bill number
+    final billNumber = await _generateBillNumber(companyId);
     final now = DateTime.now();
-    final billNumber = 'BL-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${now.hour}${now.minute}${now.second}';
 
     double totalCgst = 0;
     double totalSgst = 0;
@@ -329,7 +381,7 @@ class SupabaseService {
       final rate = (bi['rate'] as num).toDouble();
       final gstRate = (bi['gst_rate'] as num?)?.toDouble() ?? 0;
       final isTaxable = bi['is_taxable'] as bool? ?? true;
-      
+
       double cgst = 0;
       double sgst = 0;
       double igst = 0;
@@ -340,7 +392,7 @@ class SupabaseService {
         final itemTax = (qty * rate) * (gstRate / 100);
         cgst = itemTax / 2;
         sgst = itemTax / 2;
-        
+
         totalCgst += cgst;
         totalSgst += sgst;
       }
@@ -391,7 +443,7 @@ class SupabaseService {
     for (var item in itemsToInsert) {
       item['bill_id'] = billId;
     }
-    
+
     await client.from('bill_item').insert(itemsToInsert);
 
     // If table session exists, update it
@@ -405,12 +457,24 @@ class SupabaseService {
     return bill;
   }
 
-  static Future<List<Map<String, dynamic>>> getBills(String companyId) async {
-    final res = await client
-        .from('bills')
-        .select('*, bill_items(*, items(item_name))')
-        .eq('company_id', companyId)
-        .order('created_at', ascending: false);
+  static Future<List<Map<String, dynamic>>> getBills(
+    String companyId, {
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
+    var query = client
+        .from('bill_master')
+        .select('*, bill_item(*), table_session(table_master(table_number))')
+        .eq('company_id', companyId);
+
+    if (startDate != null) {
+      query = query.gte('bill_date', startDate.toIso8601String());
+    }
+    if (endDate != null) {
+      query = query.lte('bill_date', endDate.toIso8601String());
+    }
+
+    final res = await query.order('bill_date', ascending: false);
     return List<Map<String, dynamic>>.from(res);
   }
 

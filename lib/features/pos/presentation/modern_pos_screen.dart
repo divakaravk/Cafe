@@ -7,9 +7,8 @@ import '../../../core/services/supabase_service.dart';
 import '../../../core/widgets/pos_widgets.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
-import '../../admin/presentation/company_master_screen.dart';
-import '../../admin/presentation/user_master_screen.dart';
-import '../../admin/presentation/item_master_screen.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import '../../../core/services/local_parser_service.dart';
 
 /// Modern POS Screen — Tablet-first split layout
 /// Left: Item categories + grid | Right: sticky billing panel
@@ -26,7 +25,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   Item? _selectedItem;
   String _searchQuery = '';
   final _searchController = TextEditingController();
-  bool _isGroupsOn = true;
+  bool _isGroupsOn = false;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Cart Animation State
@@ -35,12 +34,126 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   bool _isCartExpanded = false;
   DateTime? _lastAddEvent;
 
+  // Voice AI State
+  final SpeechToText _speechToText = SpeechToText();
+  bool _isListening = false;
+  bool _isProcessingAI = false;
+  bool _isVoiceAIEnabled = false;
+  String _lastWords = '';
+  final _localParser = LocalParserService();
+
   @override
   void initState() {
     super.initState();
+    _initSpeech();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadSettings();
     });
+  }
+
+  void _initSpeech() async {
+    await _speechToText.initialize();
+    if (mounted) setState(() {});
+  }
+
+  void _startListening() async {
+    await _speechToText.listen(onResult: _onSpeechResult);
+    setState(() => _isListening = true);
+  }
+
+  void _stopListening() async {
+    await _speechToText.stop();
+    setState(() {
+      _isListening = false;
+      if (_lastWords.isNotEmpty && _isVoiceAIEnabled) {
+        _processVoiceOrder(_lastWords);
+      }
+    });
+  }
+
+  void _onSpeechResult(result) {
+    debugPrint('Speech result: ${result.recognizedWords}');
+    setState(() {
+      _lastWords = result.recognizedWords;
+    });
+  }
+
+  Future<void> _processVoiceOrder(String text) async {
+    if (text.isEmpty) return;
+    setState(() => _isProcessingAI = true);
+
+    try {
+      final user = ref.read(authStateProvider).value;
+      if (user == null) return;
+
+      final itemsAsync = ref.read(allItemsProvider(user.companyId));
+      final items = itemsAsync.value ?? [];
+
+      final orders = _localParser.parseOrder(text, items);
+
+      if (orders.isNotEmpty) {
+        _applyVoiceOrderToCart(orders, items);
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessingAI = false);
+    }
+  }
+
+  void _applyVoiceOrderToCart(List<dynamic> orders, List<Item> items) {
+    try {
+      for (final order in orders) {
+        final itemName = (order['item'] as String).toLowerCase().trim();
+        final qty = (order['qty'] as num).toInt();
+
+        Item? matchedItem;
+        ItemVariant? matchedVariant;
+
+        for (final item in items) {
+          if (item.itemName.toLowerCase().trim() == itemName) {
+            matchedItem = item;
+            break;
+          }
+          if (item.hasVariants) {
+            for (final v in item.variants) {
+              if (v.variantName.toLowerCase().trim() == itemName ||
+                  "${item.itemName} ${v.variantName}".toLowerCase().trim() ==
+                      itemName) {
+                matchedItem = item;
+                matchedVariant = v;
+                break;
+              }
+            }
+          }
+          if (matchedItem != null) break;
+        }
+
+        if (matchedItem == null) {
+          for (final item in items) {
+            if (item.itemName.toLowerCase().contains(itemName) ||
+                itemName.contains(item.itemName.toLowerCase())) {
+              matchedItem = item;
+              break;
+            }
+          }
+        }
+
+        if (matchedItem != null) {
+          for (int i = 0; i < qty; i++) {
+            _triggerCartAnimation(matchedItem, matchedVariant);
+          }
+        }
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('AI added ${orders.length} items to order'),
+          backgroundColor: AppColors.success,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Cart parse error: $e');
+    }
   }
 
   Future<void> _loadSettings() async {
@@ -48,7 +161,8 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     if (user != null) {
       final company = await ref.read(companyProvider(user.companyId).future);
       if (company != null) {
-        setState(() => _isGroupsOn = company.hasItemVariants);
+        // We keep it disabled by default as per requirement
+        // setState(() => _isGroupsOn = company.hasItemVariants);
       }
     }
   }
@@ -105,18 +219,85 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               ),
               // Menu area
               Expanded(
-                child: itemGroupsAsync.when(
-                  data: (items) => _buildMenuArea(
-                    items,
-                    cart,
-                    cartNotifier,
-                    isDark,
-                    isTablet,
-                  ),
-                  loading: () =>
-                      const Center(child: CircularProgressIndicator()),
-                  error: (e, _) =>
-                      Center(child: Text('Error loading items: $e')),
+                child: Stack(
+                  children: [
+                    itemGroupsAsync.when(
+                      data: (items) => _buildMenuArea(
+                        items,
+                        cart,
+                        cartNotifier,
+                        isDark,
+                        isTablet,
+                      ),
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (e, _) =>
+                          Center(child: Text('Error loading items: $e')),
+                    ),
+                    // Floating Microphone Button
+                    if (_isVoiceAIEnabled)
+                      Positioned(
+                        right: 20,
+                        bottom: 20,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (_isProcessingAI)
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 12),
+                                child: CircularProgressIndicator(
+                                  color: AppColors.primaryAmber,
+                                ),
+                              )
+                            else if (_isListening)
+                              Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    margin: const EdgeInsets.only(bottom: 12),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.error.withValues(
+                                        alpha: 0.1,
+                                      ),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      'Listening...',
+                                      style: GoogleFonts.inter(
+                                        color: AppColors.error,
+                                        fontSize: 8,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  )
+                                  .animate(
+                                    onPlay: (controller) => controller.repeat(),
+                                  )
+                                  .fadeOut(duration: 800.ms)
+                                  .fadeIn(duration: 800.ms),
+                            FloatingActionButton(
+                                  onPressed: _isListening
+                                      ? _stopListening
+                                      : _startListening,
+                                  backgroundColor: _isListening
+                                      ? AppColors.error
+                                      : AppColors.primaryOrange,
+                                  elevation: 8,
+                                  child: Icon(
+                                    _isListening ? Icons.stop : Icons.mic,
+                                  ),
+                                )
+                                .animate(target: _isListening ? 1 : 0)
+                                .scale(
+                                  begin: const Offset(1, 1),
+                                  end: const Offset(1.1, 1.1),
+                                  duration: 500.ms,
+                                ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ),
               // Mobile Bottom Panel
@@ -207,6 +388,28 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                 size: 20,
               ),
               onPressed: () => ref.read(isDarkModeProvider.notifier).toggle(),
+            ),
+            const SizedBox(width: 8),
+            // Voice AI Toggle
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Voice',
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Transform.scale(
+                  scale: 0.7,
+                  child: Switch(
+                    value: _isVoiceAIEnabled,
+                    activeColor: AppColors.primaryAmber,
+                    onChanged: (v) => setState(() => _isVoiceAIEnabled = v),
+                  ),
+                ),
+              ],
             ),
             // Item Groups Toggle (Hidden if company doesn't use variants)
             if (ref
@@ -724,8 +927,11 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                      .withValues(alpha: 0.1),
+                  color:
+                      (isDark
+                              ? AppColors.primaryAmber
+                              : AppColors.primaryOrange)
+                          .withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
@@ -760,7 +966,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                   ),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.error,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                   ),
                 ),
             ],
@@ -804,12 +1013,15 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                     final ci = cart[index];
                     return CartItemRow(
                       cartItem: ci,
-                      onIncrement: () =>
-                          ref.read(cartProvider(null).notifier).incrementQty(ci.item.id, ci.variant?.id),
-                      onDecrement: () =>
-                          ref.read(cartProvider(null).notifier).decrementQty(ci.item.id, ci.variant?.id),
-                      onRemove: () =>
-                          ref.read(cartProvider(null).notifier).removeItem(ci.item.id, ci.variant?.id),
+                      onIncrement: () => ref
+                          .read(cartProvider(null).notifier)
+                          .incrementQty(ci.item.id, ci.variant?.id),
+                      onDecrement: () => ref
+                          .read(cartProvider(null).notifier)
+                          .decrementQty(ci.item.id, ci.variant?.id),
+                      onRemove: () => ref
+                          .read(cartProvider(null).notifier)
+                          .removeItem(ci.item.id, ci.variant?.id),
                     );
                   },
                 ),
@@ -821,7 +1033,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               color: isDark ? AppColors.darkElevated : AppColors.lightSurface,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(32),
+              ),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.15),

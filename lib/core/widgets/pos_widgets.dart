@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../theme/app_colors.dart';
 import '../../models/models.dart';
 
@@ -219,7 +220,7 @@ class CartItemRow extends StatelessWidget {
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: _buildCartItemImage(cartItem),
+                child: _buildCartItemImage(isDark, cartItem),
               ),
             ),
 
@@ -299,16 +300,31 @@ class CartItemRow extends StatelessWidget {
     );
   }
 
-  Widget _buildCartItemImage(CartItem ci) {
+  Widget _buildCartItemImage(bool isDark, CartItem ci) {
     // Prefer variant image, fallback to item image
     final url = ci.variant?.imageUrl ?? ci.item.imageUrl;
     if (url != null && url.isNotEmpty) {
-      return Image.network(
-        url,
+      return CachedNetworkImage(
+        imageUrl: url,
         fit: BoxFit.cover,
         width: 36,
         height: 36,
-        errorBuilder: (_, __, ___) => const Center(
+        placeholder: (context, url) => Container(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : Colors.black.withValues(alpha: 0.05),
+          child: const Center(
+            child: SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.primaryAmber,
+              ),
+            ),
+          ),
+        ),
+        errorWidget: (_, __, ___) => const Center(
           child: Icon(Icons.fastfood_rounded, size: 18, color: Colors.grey),
         ),
       );
@@ -459,11 +475,21 @@ class CategoryCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: imageUrl != null && imageUrl!.isNotEmpty
-                  ? Image.network(
-                      imageUrl!,
+                  ? CachedNetworkImage(
+                      imageUrl: imageUrl!,
                       height: 40,
                       width: 40,
-                      errorBuilder: (_, __, ___) =>
+                      placeholder: (context, url) => const SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primaryAmber,
+                          ),
+                        ),
+                      ),
+                      errorWidget: (_, __, ___) =>
                           const Icon(Icons.fastfood_rounded, size: 30),
                     )
                   : const Icon(
@@ -569,10 +595,21 @@ class ItemVariantRow extends StatelessWidget {
                 child: imageUrl != null && imageUrl!.isNotEmpty
                     ? ClipRRect(
                         borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          imageUrl!,
+                        child: CachedNetworkImage(
+                          imageUrl: imageUrl!,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
+                          placeholder: (context, url) => Container(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.black.withValues(alpha: 0.05),
+                            child: const Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primaryAmber,
+                              ),
+                            ),
+                          ),
+                          errorWidget: (_, __, ___) =>
                               const Icon(Icons.fastfood_rounded),
                         ),
                       )
@@ -768,10 +805,21 @@ class SimpleVariantTile extends StatelessWidget {
                             borderRadius: const BorderRadius.vertical(
                               top: Radius.circular(13),
                             ),
-                            child: Image.network(
-                              imageUrl!,
+                            child: CachedNetworkImage(
+                              imageUrl: imageUrl!,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const Center(
+                              placeholder: (context, url) => Container(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.05)
+                                    : Colors.black.withValues(alpha: 0.05),
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.primaryAmber,
+                                  ),
+                                ),
+                              ),
+                              errorWidget: (_, __, ___) => const Center(
                                 child: Icon(
                                   Icons.fastfood_rounded,
                                   color: Colors.grey,

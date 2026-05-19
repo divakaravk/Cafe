@@ -82,14 +82,14 @@ class UserProfile {
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
     id: json['id'] as String,
     companyId: json['company_id'] as String,
-    role: json['role'] as String? ?? 'cashier',
-    fullName: json['full_name'] as String? ?? '',
+    role: json['user_role'] as String? ?? 'cashier',
+    fullName: json['user_name'] as String? ?? '',
     employeeCode: json['employee_code'] as String? ?? '',
     username: json['username'] as String?,
-    phone: json['phone'] as String?,
-    email: json['email'] as String?,
+    phone: json['mob_number'] as String?,
+    email: json['user_email'] as String?,
     avatarUrl: json['avatar_url'] as String?,
-    isActive: json['is_active'] as bool? ?? true,
+    isActive: json['user_active'] as bool? ?? true,
     createdAt: json['created_at'] != null
         ? DateTime.parse(json['created_at'] as String)
         : null,
@@ -98,14 +98,14 @@ class UserProfile {
   Map<String, dynamic> toJson() => {
     'id': id,
     'company_id': companyId,
-    'role': role.toLowerCase(),
-    'full_name': fullName,
+    'user_role': role.toLowerCase(),
+    'user_name': fullName,
     'employee_code': employeeCode,
     'username': username,
-    'phone': phone,
-    'email': email,
+    'mob_number': phone,
+    'user_email': email,
     'avatar_url': avatarUrl,
-    'is_active': isActive,
+    'user_active': isActive,
   };
 }
 
@@ -260,11 +260,21 @@ class Item {
             ?.map((e) => ItemVariant.fromJson(e as Map<String, dynamic>))
             .toList() ??
         [],
-    hsnCode: json['company_hsn'] != null ? json['company_hsn']['hsn_code'] as String? : null,
-    gstRate: json['company_hsn'] != null ? (json['company_hsn']['gst_rate'] as num?)?.toDouble() ?? 0 : 0,
-    cgstRate: json['company_hsn'] != null ? (json['company_hsn']['cgst_rate'] as num?)?.toDouble() ?? 0 : 0,
-    sgstRate: json['company_hsn'] != null ? (json['company_hsn']['sgst_rate'] as num?)?.toDouble() ?? 0 : 0,
-    igstRate: json['company_hsn'] != null ? (json['company_hsn']['igst_rate'] as num?)?.toDouble() ?? 0 : 0,
+    hsnCode: json['company_hsn'] != null
+        ? json['company_hsn']['hsn_code'] as String?
+        : null,
+    gstRate: json['company_hsn'] != null
+        ? (json['company_hsn']['gst_rate'] as num?)?.toDouble() ?? 0
+        : 0,
+    cgstRate: json['company_hsn'] != null
+        ? (json['company_hsn']['cgst_rate'] as num?)?.toDouble() ?? 0
+        : 0,
+    sgstRate: json['company_hsn'] != null
+        ? (json['company_hsn']['sgst_rate'] as num?)?.toDouble() ?? 0
+        : 0,
+    igstRate: json['company_hsn'] != null
+        ? (json['company_hsn']['igst_rate'] as num?)?.toDouble() ?? 0
+        : 0,
   );
 
   Map<String, dynamic> toJson() => {
@@ -343,11 +353,21 @@ class ItemVariant {
     description: json['description'] as String?,
     displayOrder: json['display_order'] as int? ?? 0,
     isAvailable: json['is_available'] as bool? ?? true,
-    hsnCode: json['company_hsn'] != null ? json['company_hsn']['hsn_code'] as String? : null,
-    gstRate: json['company_hsn'] != null ? (json['company_hsn']['gst_rate'] as num?)?.toDouble() ?? 0 : 0,
-    cgstRate: json['company_hsn'] != null ? (json['company_hsn']['cgst_rate'] as num?)?.toDouble() ?? 0 : 0,
-    sgstRate: json['company_hsn'] != null ? (json['company_hsn']['sgst_rate'] as num?)?.toDouble() ?? 0 : 0,
-    igstRate: json['company_hsn'] != null ? (json['company_hsn']['igst_rate'] as num?)?.toDouble() ?? 0 : 0,
+    hsnCode: json['company_hsn'] != null
+        ? json['company_hsn']['hsn_code'] as String?
+        : null,
+    gstRate: json['company_hsn'] != null
+        ? (json['company_hsn']['gst_rate'] as num?)?.toDouble() ?? 0
+        : 0,
+    cgstRate: json['company_hsn'] != null
+        ? (json['company_hsn']['cgst_rate'] as num?)?.toDouble() ?? 0
+        : 0,
+    sgstRate: json['company_hsn'] != null
+        ? (json['company_hsn']['sgst_rate'] as num?)?.toDouble() ?? 0
+        : 0,
+    igstRate: json['company_hsn'] != null
+        ? (json['company_hsn']['igst_rate'] as num?)?.toDouble() ?? 0
+        : 0,
   );
 
   Map<String, dynamic> toJson() => {
@@ -484,13 +504,14 @@ class Bill {
   final String id;
   final String companyId;
   final String? orderId;
-  final int? billNumber;
+  final String? billNumber;
   final double subtotal;
   final double taxAmount;
   final double discountAmount;
   final double totalAmount;
   final String paymentMode;
   final bool isVoided;
+  final String? tableName;
   final List<BillItem> items;
   final DateTime? createdAt;
 
@@ -499,6 +520,7 @@ class Bill {
     required this.companyId,
     this.orderId,
     this.billNumber,
+    this.tableName,
     required this.subtotal,
     this.taxAmount = 0,
     this.discountAmount = 0,
@@ -513,20 +535,26 @@ class Bill {
     id: json['id'] as String,
     companyId: json['company_id'] as String,
     orderId: json['order_id'] as String?,
-    billNumber: json['bill_number'] as int?,
-    subtotal: (json['subtotal'] as num).toDouble(),
+    billNumber: json['bill_number']?.toString(),
+    subtotal: (json['subtotal'] as num?)?.toDouble() ?? 0,
     taxAmount: (json['tax_amount'] as num?)?.toDouble() ?? 0,
     discountAmount: (json['discount_amount'] as num?)?.toDouble() ?? 0,
-    totalAmount: (json['total_amount'] as num).toDouble(),
+    totalAmount: (json['total_amount'] as num?)?.toDouble() ?? 0,
     paymentMode: json['payment_mode'] as String? ?? 'CASH',
+    tableName:
+        json['table_session'] != null &&
+                json['table_session']['table_master'] != null
+            ? json['table_session']['table_master']['table_number']
+                ?.toString()
+            : null,
     isVoided: json['is_voided'] as bool? ?? false,
     items:
-        (json['bill_items'] as List<dynamic>?)
+        (json['bill_item'] as List<dynamic>?)
             ?.map((e) => BillItem.fromJson(e as Map<String, dynamic>))
             .toList() ??
         [],
-    createdAt: json['created_at'] != null
-        ? DateTime.parse(json['created_at'] as String)
+    createdAt: json['bill_date'] != null
+        ? DateTime.parse(json['bill_date'] as String)
         : null,
   );
 }
@@ -537,9 +565,12 @@ class BillItem {
   final String billId;
   final String itemId;
   final String? itemName;
-  final int qty;
+  final double qty;
   final double rate;
   final double taxPercentage;
+  final double cgstAmount;
+  final double sgstAmount;
+  final double igstAmount;
 
   BillItem({
     required this.id,
@@ -549,6 +580,9 @@ class BillItem {
     required this.qty,
     required this.rate,
     this.taxPercentage = 0,
+    this.cgstAmount = 0,
+    this.sgstAmount = 0,
+    this.igstAmount = 0,
   });
 
   double get total => rate * qty;
@@ -558,12 +592,13 @@ class BillItem {
     id: json['id'] as String,
     billId: json['bill_id'] as String,
     itemId: json['item_id'] as String,
-    itemName:
-        json['item_name'] ??
-        (json['items'] != null ? json['items']['item_name'] : null) as String?,
-    qty: json['qty'] as int,
-    rate: (json['rate'] as num).toDouble(),
-    taxPercentage: (json['tax_percentage'] as num?)?.toDouble() ?? 0,
+    itemName: json['item_name_snapshot'] as String?,
+    qty: (json['qty'] as num?)?.toDouble() ?? 1.0,
+    rate: (json['rate_snapshot'] as num?)?.toDouble() ?? 0,
+    taxPercentage: (json['gst_rate_snapshot'] as num?)?.toDouble() ?? 0,
+    cgstAmount: (json['cgst_amount'] as num?)?.toDouble() ?? 0,
+    sgstAmount: (json['sgst_amount'] as num?)?.toDouble() ?? 0,
+    igstAmount: (json['igst_amount'] as num?)?.toDouble() ?? 0,
   );
 }
 
@@ -579,7 +614,7 @@ class CartItem {
   double get total => rate * qty;
   String get itemName =>
       (variant != null && variant!.variantName.toLowerCase() != 'default')
-          ? variant!.variantName
-          : item.itemName;
+      ? variant!.variantName
+      : item.itemName;
   double get rate => variant?.baseRate ?? item.baseRate;
 }

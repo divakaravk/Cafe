@@ -48,37 +48,44 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
   int _selectedNavIndex = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  bool get _isWaiter => widget.user.isWaiter;
+
   @override
   Widget build(BuildContext context) {
     final selectedTheme = ref.watch(selectedUiThemeProvider);
-    final size = MediaQuery.of(context).size;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isTablet = size.width > 800;
 
-    // POS screen based on selected theme
-    Widget posScreen;
-    switch (selectedTheme) {
-      case AppConstants.uiQuickBill:
-        posScreen = const QuickBillScreen();
-        break;
-      case AppConstants.uiClassic:
-        posScreen = const ClassicPosScreen();
-        break;
-      case AppConstants.uiModern:
-      default:
-        posScreen = const ModernPosScreen();
+    final List<Widget> screens;
+    if (_isWaiter) {
+      screens = [
+        TablesScreen(companyId: widget.user.companyId),
+      ];
+    } else {
+      Widget posScreen;
+      switch (selectedTheme) {
+        case AppConstants.uiQuickBill:
+          posScreen = const QuickBillScreen();
+          break;
+        case AppConstants.uiClassic:
+          posScreen = const ClassicPosScreen();
+          break;
+        case AppConstants.uiModern:
+        default:
+          posScreen = const ModernPosScreen();
+      }
+      screens = [
+        posScreen,
+        TablesScreen(companyId: widget.user.companyId),
+        BillsScreen(companyId: widget.user.companyId),
+      ];
     }
 
-    final List<Widget> screens = [
-      posScreen,
-      TablesScreen(companyId: widget.user.companyId),
-      BillsScreen(companyId: widget.user.companyId),
-    ];
+    final safeIndex = _selectedNavIndex.clamp(0, screens.length - 1);
 
     return Scaffold(
       key: _scaffoldKey,
       drawer: _buildUnifiedDrawer(context, isDark),
-      body: screens[_selectedNavIndex],
+      body: screens[safeIndex],
     );
   }
 
@@ -128,87 +135,101 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
             child: ListView(
               padding: EdgeInsets.zero,
               children: [
-                _buildDrawerSection('NAVIGATION', isDark),
-                _buildDrawerItem(
-                  Icons.point_of_sale_rounded,
-                  'POS Terminal',
-                  () {
-                    setState(() => _selectedNavIndex = 0);
-                    Navigator.pop(context);
-                  },
-                  isDark,
-                  isSelected: _selectedNavIndex == 0,
-                ),
-                _buildDrawerItem(
-                  Icons.table_restaurant_rounded,
-                  'Tables & KOT',
-                  () {
-                    setState(() => _selectedNavIndex = 1);
-                    Navigator.pop(context);
-                  },
-                  isDark,
-                  isSelected: _selectedNavIndex == 1,
-                ),
-                _buildDrawerItem(
-                  Icons.receipt_long_rounded,
-                  'Bills & History',
-                  () {
-                    setState(() => _selectedNavIndex = 2);
-                    Navigator.pop(context);
-                  },
-                  isDark,
-                  isSelected: _selectedNavIndex == 2,
-                ),
-                if (widget.user.isAdmin) ...[
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Divider(height: 32),
-                  ),
-                  _buildDrawerSection('ADMIN MASTERS', isDark),
+                if (_isWaiter) ...[
+                  _buildDrawerSection('NAVIGATION', isDark),
                   _buildDrawerItem(
-                    Icons.business_rounded,
-                    'Company Master',
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CompanyMasterScreen(),
-                      ),
-                    ),
+                    Icons.table_restaurant_rounded,
+                    'Tables & KOT',
+                    () {
+                      setState(() => _selectedNavIndex = 0);
+                      Navigator.pop(context);
+                    },
                     isDark,
+                    isSelected: _selectedNavIndex == 0,
+                  ),
+                ] else ...[
+                  _buildDrawerSection('NAVIGATION', isDark),
+                  _buildDrawerItem(
+                    Icons.point_of_sale_rounded,
+                    'POS Terminal',
+                    () {
+                      setState(() => _selectedNavIndex = 0);
+                      Navigator.pop(context);
+                    },
+                    isDark,
+                    isSelected: _selectedNavIndex == 0,
                   ),
                   _buildDrawerItem(
-                    Icons.people_alt_rounded,
-                    'User Master',
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const UserMasterScreen(),
-                      ),
-                    ),
+                    Icons.table_restaurant_rounded,
+                    'Tables & KOT',
+                    () {
+                      setState(() => _selectedNavIndex = 1);
+                      Navigator.pop(context);
+                    },
                     isDark,
+                    isSelected: _selectedNavIndex == 1,
                   ),
                   _buildDrawerItem(
-                    Icons.inventory_2_rounded,
-                    'Item Master',
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const ItemMasterScreen(),
-                      ),
-                    ),
+                    Icons.receipt_long_rounded,
+                    'Bills & History',
+                    () {
+                      setState(() => _selectedNavIndex = 2);
+                      Navigator.pop(context);
+                    },
                     isDark,
+                    isSelected: _selectedNavIndex == 2,
                   ),
-                  _buildDrawerItem(
-                    Icons.category_rounded,
-                    'Item Group',
-                    () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const ItemMasterScreen(),
-                      ),
+                  if (widget.user.isAdmin) ...[
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16),
+                      child: Divider(height: 32),
                     ),
-                    isDark,
-                  ),
+                    _buildDrawerSection('ADMIN MASTERS', isDark),
+                    _buildDrawerItem(
+                      Icons.business_rounded,
+                      'Company Master',
+                      () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const CompanyMasterScreen(),
+                        ),
+                      ),
+                      isDark,
+                    ),
+                    _buildDrawerItem(
+                      Icons.people_alt_rounded,
+                      'User Master',
+                      () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const UserMasterScreen(),
+                        ),
+                      ),
+                      isDark,
+                    ),
+                    _buildDrawerItem(
+                      Icons.inventory_2_rounded,
+                      'Item Master',
+                      () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ItemMasterScreen(),
+                        ),
+                      ),
+                      isDark,
+                    ),
+                    _buildDrawerItem(
+                      Icons.category_rounded,
+                      'Item Group',
+                      () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => const ItemMasterScreen(),
+                        ),
+                      ),
+                      isDark,
+                    ),
+                  ],
                 ],
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),

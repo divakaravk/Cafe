@@ -159,19 +159,19 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
       final userData = {
         'id': userId,
         'company_id': authUser.companyId,
-        'full_name': _nameController.text,
+        'user_name': _nameController.text,
         'employee_code': _codeController.text,
         'username': _usernameController.text,
-        'role': _selectedRole,
-        'phone': _phoneController.text,
-        'email': _emailController.text,
-        'is_active': _isActive,
+        'user_role': _selectedRole,
+        'mob_number': _phoneController.text,
+        'user_email': _emailController.text,
+        'user_active': _isActive,
         'avatar_url': currentAvatarUrl,
       };
 
       // Only update password if provided
       if (_passwordController.text.isNotEmpty) {
-        userData['password_hash'] = _passwordController.text;
+        userData['password'] = _passwordController.text;
       } else if (_selectedUser == null) {
         throw 'Password is required for new users';
       }

@@ -215,7 +215,7 @@ final isDarkModeProvider = NotifierProvider<IsDarkModeNotifier, bool>(
 
 class IsDarkModeNotifier extends Notifier<bool> {
   @override
-  bool build() => true;
+  bool build() => false;
 
   void toggle() => state = !state;
   void set(bool value) => state = value;
