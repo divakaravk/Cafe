@@ -12,6 +12,10 @@ class MetricCard extends StatelessWidget {
   final IconData icon;
   final List<Color> gradient;
   final bool isDark;
+  final String? subtext;
+  final double? progress;
+  final String? trendText;
+  final bool isPositive;
 
   const MetricCard({
     super.key,
@@ -20,60 +24,149 @@ class MetricCard extends StatelessWidget {
     required this.icon,
     required this.gradient,
     required this.isDark,
+    this.subtext,
+    this.progress,
+    this.trendText,
+    this.isPositive = true,
   });
 
   @override
   Widget build(BuildContext context) {
+    final accentColor = gradient.first;
+
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: gradient,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+        color: isDark ? AppColors.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark
+              ? AppColors.darkBorder.withValues(alpha: 0.3)
+              : AppColors.lightBorder.withValues(alpha: 0.4),
         ),
-        borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: gradient.first.withOpacity(0.3),
-            blurRadius: 15,
-            offset: const Offset(0, 8),
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.2)
+                : accentColor.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: Colors.white, size: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  icon,
+                  color: accentColor,
+                  size: 20,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 20),
-          Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: Colors.white.withOpacity(0.8),
-              fontWeight: FontWeight.w500,
-            ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Expanded(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 22,
+                    color: isDark ? Colors.white : AppColors.textDark,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+              ),
+              if (trendText != null) ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: (isPositive ? AppColors.accentTeal : Colors.red)
+                        .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isPositive
+                            ? Icons.arrow_upward_rounded
+                            : Icons.arrow_downward_rounded,
+                        color: isPositive ? const Color(0xFF00B09B) : Colors.red,
+                        size: 9,
+                      ),
+                      const SizedBox(width: 1),
+                      Text(
+                        trendText!,
+                        style: GoogleFonts.inter(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: isPositive ? const Color(0xFF00B09B) : Colors.red,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: GoogleFonts.inter(
-              fontSize: 22,
-              color: Colors.white,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
+          if (progress != null || subtext != null) ...[
+            const SizedBox(height: 12),
+            if (progress != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 4,
+                  backgroundColor: isDark
+                      ? AppColors.darkBorder.withValues(alpha: 0.3)
+                      : AppColors.lightBorder.withValues(alpha: 0.4),
+                  valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+                ),
+              ),
+              const SizedBox(height: 6),
+            ],
+            if (subtext != null)
+              Text(
+                subtext!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+          ],
         ],
       ),
     );
@@ -117,7 +210,7 @@ class FilterChipWidget extends StatelessWidget {
                         (isDark
                                 ? AppColors.primaryAmber
                                 : AppColors.primaryOrange)
-                            .withOpacity(0.3),
+                            .withValues(alpha: 0.3),
                     blurRadius: 10,
                     offset: const Offset(0, 4),
                   ),
@@ -935,7 +1028,9 @@ class CategoryPieChart extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: List.generate(sortedEntries.length, (i) {
                 final entry = sortedEntries[i];
-                final percentage = totalSales > 0 ? (entry.value / totalSales) * 100 : 0.0;
+                final percentage = totalSales > 0
+                    ? (entry.value / totalSales) * 100
+                    : 0.0;
                 final color = colors[i % colors.length];
 
                 return Padding(
@@ -969,7 +1064,9 @@ class CategoryPieChart extends StatelessWidget {
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                          color: isDark
+                              ? AppColors.textWhiteMuted
+                              : AppColors.textDarkMuted,
                         ),
                       ),
                     ],
@@ -1237,12 +1334,14 @@ class StatInsightCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.darkElevated.withOpacity(0.5) : Colors.white,
+        color: isDark
+            ? AppColors.darkElevated.withValues(alpha: 0.5)
+            : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isDark
-              ? AppColors.darkBorder.withOpacity(0.3)
-              : AppColors.lightBorder.withOpacity(0.5),
+              ? AppColors.darkBorder.withValues(alpha: 0.3)
+              : AppColors.lightBorder.withValues(alpha: 0.5),
         ),
       ),
       child: Row(
@@ -1250,7 +1349,7 @@ class StatInsightCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.15),
+              color: iconColor.withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
             child: Icon(icon, color: iconColor, size: 20),

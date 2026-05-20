@@ -25,6 +25,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
   String _selectedTrendMetric = 'revenue'; // 'revenue' or 'count'
   String _searchQuery = '';
   String _selectedPaymentFilter = 'ALL'; // 'ALL', 'CASH', 'UPI', 'CARD'
+  bool _showFilters = false;
 
   @override
   Widget build(BuildContext context) {
@@ -154,7 +155,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
               ),
 
               // Date Filters
-              _buildFilters(isDark, reportState, reportNotifier),
+              if (_showFilters)
+                _buildFilters(isDark, reportState, reportNotifier),
 
               // TabBar
               Padding(
@@ -588,11 +590,29 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
             color: isDark ? AppColors.primaryAmber : AppColors.primaryOrange,
           ),
           const SizedBox(width: 10),
-          Text(
-            'Reports Dashboard',
-            style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800),
+          Expanded(
+            child: Text(
+              'Reports Dashboard',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
           ),
-          const Spacer(),
+          IconButton(
+            icon: Icon(
+              _showFilters
+                  ? Icons.filter_alt_rounded
+                  : Icons.filter_alt_outlined,
+              color: _showFilters
+                  ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                  : null,
+            ),
+            onPressed: () => setState(() => _showFilters = !_showFilters),
+            tooltip: 'Toggle Filters',
+          ),
           IconButton(
             icon: const Icon(Icons.picture_as_pdf_rounded),
             onPressed: onExportPdf,
@@ -725,6 +745,29 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
   }
 
   Widget _buildSummaryMetrics(ReportState state, bool isDark) {
+    final totalRevenue = state.totalRevenue;
+    final totalOrders = state.totalOrders;
+    final aov = totalOrders > 0 ? totalRevenue / totalOrders : 0.0;
+
+    double? revenueTrend;
+    if (state.comparisonBills.isNotEmpty) {
+      final prevRevenue = state.comparisonBills.fold<double>(0.0, (sum, b) => sum + b.totalAmount);
+      if (prevRevenue > 0) {
+        revenueTrend = ((totalRevenue - prevRevenue) / prevRevenue) * 100;
+      }
+    }
+
+    double? ordersTrend;
+    if (state.comparisonBills.isNotEmpty) {
+      final prevOrders = state.comparisonBills.length;
+      if (prevOrders > 0) {
+        ordersTrend = ((totalOrders - prevOrders) / prevOrders) * 100;
+      }
+    }
+
+    final cashShare = totalRevenue > 0 ? (state.cashTotal / totalRevenue) : 0.0;
+    final digitalShare = totalRevenue > 0 ? ((state.upiTotal + state.cardTotal) / totalRevenue) : 0.0;
+
     return Column(
       children: [
         Row(
@@ -736,6 +779,11 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 icon: Icons.account_balance_wallet_rounded,
                 gradient: const [Color(0xFF6A11CB), Color(0xFF2575FC)],
                 isDark: isDark,
+                subtext: 'Avg. Ticket: ₹${aov.toStringAsFixed(0)}',
+                trendText: revenueTrend != null
+                    ? '${revenueTrend >= 0 ? '+' : ''}${revenueTrend.toStringAsFixed(1)}%'
+                    : null,
+                isPositive: revenueTrend == null || revenueTrend >= 0,
               ),
             ),
             const SizedBox(width: 12),
@@ -746,6 +794,11 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 icon: Icons.shopping_basket_rounded,
                 gradient: const [Color(0xFFFF9A9E), Color(0xFFFAD0C4)],
                 isDark: isDark,
+                subtext: 'Processed Bills',
+                trendText: ordersTrend != null
+                    ? '${ordersTrend >= 0 ? '+' : ''}${ordersTrend.toStringAsFixed(1)}%'
+                    : null,
+                isPositive: ordersTrend == null || ordersTrend >= 0,
               ),
             ),
           ],
@@ -760,6 +813,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 icon: Icons.payments_rounded,
                 gradient: const [Color(0xFF00B09B), Color(0xFF96C93D)],
                 isDark: isDark,
+                progress: cashShare,
+                subtext: '${(cashShare * 100).toStringAsFixed(0)}% of total sales',
               ),
             ),
             const SizedBox(width: 12),
@@ -771,6 +826,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 icon: Icons.qr_code_rounded,
                 gradient: const [Color(0xFFF2994A), Color(0xFFF2C94C)],
                 isDark: isDark,
+                progress: digitalShare,
+                subtext: '${(digitalShare * 100).toStringAsFixed(0)}% of total sales',
               ),
             ),
           ],
@@ -876,15 +933,19 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                title,
-                style: GoogleFonts.inter(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? Colors.white : AppColors.textDark,
+              Expanded(
+                child: Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : AppColors.textDark,
+                  ),
                 ),
               ),
-              if (action != null) action,
+              if (action != null) ...[const SizedBox(width: 8), action],
             ],
           ),
           const SizedBox(height: 20),

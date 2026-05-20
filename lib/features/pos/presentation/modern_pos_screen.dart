@@ -34,6 +34,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   bool _isCartExpanded = false;
   DateTime? _lastAddEvent;
 
+  // Top bar filter panel
+  bool _showFilters = false;
+
   // Voice AI State
   final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
@@ -300,9 +303,6 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                   ],
                 ),
               ),
-              // Mobile Bottom Panel
-              if (!isTablet && cart.isNotEmpty)
-                _buildMobileOrderPanel(cart, user),
             ],
           ),
           // Toggle arrows (Navigation ONLY)
@@ -396,92 +396,86 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                       : Icons.dark_mode_rounded,
                   size: 20,
                 ),
-                onPressed: () =>
-                    ref.read(isDarkModeProvider.notifier).toggle(),
+                onPressed: () => ref.read(isDarkModeProvider.notifier).toggle(),
               ),
             ),
             const SizedBox(width: 4),
-            // On narrow screens use a popup; on wide screens show toggles inline
-            Builder(
-              builder: (ctx) {
-                final screenW = MediaQuery.sizeOf(ctx).width;
-                final hasVariants = ref
-                        .watch(companyProvider(user.companyId))
-                        .value
-                        ?.hasItemVariants ??
-                    false;
-                // ≥ 480dp: show inline toggles
-                if (screenW >= 480) {
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _buildCompactToggle(
-                        label: 'Voice',
-                        value: _isVoiceAIEnabled,
-                        onChanged: (v) =>
-                            setState(() => _isVoiceAIEnabled = v),
-                      ),
-                      if (hasVariants)
-                        _buildCompactToggle(
-                          label: 'Groups',
-                          value: _isGroupsOn,
-                          onChanged: (v) => setState(() {
-                            _isGroupsOn = v;
-                            _selectedItem = null;
-                            _selectedSection = null;
-                          }),
+            // Filter toggle button — reveals Voice & Groups chips
+            GestureDetector(
+              onTap: () => setState(() => _showFilters = !_showFilters),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: _showFilters
+                      ? (isDark
+                            ? AppColors.primaryAmber
+                            : AppColors.primaryOrange)
+                      : (isDark
+                            ? Colors.white.withValues(alpha: 0.08)
+                            : Colors.black.withValues(alpha: 0.06)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _showFilters
+                        ? (isDark
+                              ? AppColors.primaryAmber
+                              : AppColors.primaryOrange)
+                        : (isDark
+                              ? Colors.white.withValues(alpha: 0.15)
+                              : Colors.black.withValues(alpha: 0.12)),
+                  ),
+                ),
+                child: Icon(
+                  Icons.tune_rounded,
+                  size: 16,
+                  color: _showFilters
+                      ? Colors.white
+                      : (isDark
+                            ? AppColors.textWhiteMuted
+                            : AppColors.textDarkMuted),
+                ),
+              ),
+            ),
+            // Chips slide in when filter panel is open
+            AnimatedSize(
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeInOut,
+              child: _showFilters
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const SizedBox(width: 6),
+                        _buildToggleChip(
+                          icon: Icons.mic_rounded,
+                          label: 'Voice',
+                          value: _isVoiceAIEnabled,
+                          isDark: isDark,
+                          onTap: () => setState(
+                            () => _isVoiceAIEnabled = !_isVoiceAIEnabled,
+                          ),
                         ),
-                    ],
-                  );
-                }
-                // < 480dp: collapse into a single popup icon
-                return PopupMenuButton<String>(
-                  icon: const Icon(Icons.tune_rounded, size: 20),
-                  padding: EdgeInsets.zero,
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      enabled: false,
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text('Voice AI',
-                              style: GoogleFonts.inter(fontSize: 13)),
-                          Switch(
-                            value: _isVoiceAIEnabled,
-                            activeColor: AppColors.primaryAmber,
-                            onChanged: (v) =>
-                                setState(() => _isVoiceAIEnabled = v),
+                        if (ref
+                                .watch(companyProvider(user.companyId))
+                                .value
+                                ?.hasItemVariants ??
+                            false) ...[
+                          const SizedBox(width: 6),
+                          _buildToggleChip(
+                            icon: Icons.layers_rounded,
+                            label: 'Groups',
+                            value: _isGroupsOn,
+                            isDark: isDark,
+                            onTap: () => setState(() {
+                              _isGroupsOn = !_isGroupsOn;
+                              _selectedItem = null;
+                              _selectedSection = null;
+                            }),
                           ),
                         ],
-                      ),
-                    ),
-                    if (hasVariants)
-                      PopupMenuItem(
-                        enabled: false,
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 12),
-                        child: Row(
-                          mainAxisAlignment:
-                              MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('Groups',
-                                style: GoogleFonts.inter(fontSize: 13)),
-                            Switch(
-                              value: _isGroupsOn,
-                              activeColor: AppColors.primaryAmber,
-                              onChanged: (v) => setState(() {
-                                _isGroupsOn = v;
-                                _selectedItem = null;
-                                _selectedSection = null;
-                              }),
-                            ),
-                          ],
-                        ),
-                      ),
-                  ],
-                );
-              },
+                      ],
+                    )
+                  : const SizedBox.shrink(),
             ),
           ],
         ),
@@ -489,32 +483,63 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     ).animate().fadeIn(duration: 300.ms);
   }
 
-  // ─── COMPACT TOGGLE ─────────────────────────────────────
-  Widget _buildCompactToggle({
+  // ─── TOGGLE CHIP ────────────────────────────────────────
+  Widget _buildToggleChip({
+    required IconData icon,
     required String label,
     required bool value,
-    required ValueChanged<bool> onChanged,
+    required bool isDark,
+    required VoidCallback onTap,
   }) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600),
-        ),
-        SizedBox(
-          width: 44,
-          height: 28,
-          child: FittedBox(
-            fit: BoxFit.fill,
-            child: Switch(
-              value: value,
-              activeColor: AppColors.primaryAmber,
-              onChanged: onChanged,
-            ),
+    final active = value;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        decoration: BoxDecoration(
+          color: active
+              ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+              : (isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.06)),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: active
+                ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                : (isDark
+                      ? Colors.white.withValues(alpha: 0.18)
+                      : Colors.black.withValues(alpha: 0.12)),
           ),
         ),
-      ],
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 13,
+              color: active
+                  ? Colors.white
+                  : (isDark
+                        ? AppColors.textWhiteMuted
+                        : AppColors.textDarkMuted),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: active
+                    ? Colors.white
+                    : (isDark
+                          ? AppColors.textWhiteMuted
+                          : AppColors.textDarkMuted),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -933,8 +958,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           final cartNotifier = ref.read(cartProvider(null).notifier);
           final isDark = ref.watch(isDarkModeProvider);
 
+          final mq = MediaQuery.of(context);
           return Container(
-            height: MediaQuery.of(context).size.height * 0.85,
+            height: mq.size.height * 0.88,
             decoration: BoxDecoration(
               color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
               borderRadius: const BorderRadius.vertical(
@@ -972,7 +998,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     );
   }
 
-  // ─── BILLING PANEL (Tablet) ────────────────────────────
+  // ─── BILLING PANEL ─────────────────────────────────────
   Widget _buildBillingPanel(
     List<CartItem> cart,
     CartNotifier cartNotifier,
@@ -983,12 +1009,18 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     final subtotal = cart.fold<double>(0, (sum, ci) => sum + ci.total);
     final discountAmount = subtotal * (discount / 100);
     final total = subtotal - discountAmount;
+    final mq = MediaQuery.of(context);
+    final sw = mq.size.width;
+    final navBottom = mq.viewPadding.bottom;
+    final compact = sw < 400;
+    final hp = compact ? 14.0 : 20.0; // horizontal padding
+    final vp = compact ? 12.0 : 16.0; // vertical padding for header/sections
 
     return Column(
       children: [
         // Header
         Container(
-          padding: const EdgeInsets.fromLTRB(24, 28, 20, 20),
+          padding: EdgeInsets.fromLTRB(hp, vp + 4, hp - 4, vp),
           decoration: BoxDecoration(
             color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
             border: Border(
@@ -1002,28 +1034,28 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           child: Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(compact ? 6 : 8),
                 decoration: BoxDecoration(
                   color:
                       (isDark
                               ? AppColors.primaryAmber
                               : AppColors.primaryOrange)
                           .withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                 ),
                 child: Icon(
                   Icons.receipt_long_rounded,
-                  size: 18,
+                  size: compact ? 15 : 18,
                   color: isDark
                       ? AppColors.primaryAmber
                       : AppColors.primaryOrange,
                 ),
               ),
-              const SizedBox(width: 12),
+              SizedBox(width: compact ? 8 : 12),
               Text(
                 'Current Bill',
                 style: GoogleFonts.inter(
-                  fontSize: 18,
+                  fontSize: compact ? 15 : 17,
                   fontWeight: FontWeight.w800,
                   letterSpacing: -0.5,
                 ),
@@ -1032,21 +1064,26 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               if (cart.isNotEmpty)
                 TextButton.icon(
                   onPressed: () => cartNotifier.clear(),
-                  icon: const Icon(Icons.delete_outline_rounded, size: 16),
+                  icon: Icon(
+                    Icons.delete_outline_rounded,
+                    size: compact ? 14 : 16,
+                  ),
                   label: Text(
                     'Clear',
                     style: GoogleFonts.inter(
-                      fontSize: 12,
+                      fontSize: compact ? 11 : 12,
                       color: AppColors.error,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                   style: TextButton.styleFrom(
                     foregroundColor: AppColors.error,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
+                    padding: EdgeInsets.symmetric(
+                      horizontal: compact ? 8 : 12,
+                      vertical: compact ? 6 : 8,
                     ),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
                 ),
             ],
@@ -1062,7 +1099,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                     children: [
                       Icon(
                         Icons.add_shopping_cart_rounded,
-                        size: 40,
+                        size: 36,
                         color: isDark
                             ? AppColors.textWhiteMuted.withValues(alpha: 0.3)
                             : AppColors.textDarkMuted.withValues(alpha: 0.3),
@@ -1081,9 +1118,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 8,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: compact ? 8 : 12,
+                    vertical: 6,
                   ),
                   itemCount: cart.length,
                   itemBuilder: (context, index) {
@@ -1105,20 +1142,20 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
         ),
 
         // Totals + Actions
+        // navBottom ensures payment buttons never hide behind device nav bar
         if (cart.isNotEmpty)
           Container(
-            padding: const EdgeInsets.all(24),
+            padding: EdgeInsets.fromLTRB(hp, vp, hp, vp + navBottom),
             decoration: BoxDecoration(
               color: isDark ? AppColors.darkElevated : AppColors.lightSurface,
               borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(32),
+                top: Radius.circular(24),
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.15),
-                  blurRadius: 30,
-                  spreadRadius: 0,
-                  offset: const Offset(0, -10),
+                  color: Colors.black.withValues(alpha: 0.12),
+                  blurRadius: 20,
+                  offset: const Offset(0, -6),
                 ),
               ],
               border: Border(
@@ -1130,22 +1167,27 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               ),
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 // Discount row
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Discount', style: GoogleFonts.inter(fontSize: 13)),
+                    Text(
+                      'Discount',
+                      style: GoogleFonts.inter(fontSize: compact ? 12 : 13),
+                    ),
                     SizedBox(
-                      width: 80,
+                      width: 72,
                       child: TextField(
                         keyboardType: TextInputType.number,
+                        style: GoogleFonts.inter(fontSize: compact ? 12 : 13),
                         decoration: InputDecoration(
                           hintText: '0%',
                           isDense: true,
                           contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
+                            horizontal: 8,
+                            vertical: 6,
                           ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
@@ -1159,21 +1201,25 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-
-                // Subtotal
-                _totalRow('Subtotal', subtotal, isDark),
+                SizedBox(height: compact ? 8 : 10),
+                _totalRow('Subtotal', subtotal, isDark, compact: compact),
                 if (discount > 0)
                   _totalRow(
                     'Discount (${discount.toStringAsFixed(0)}%)',
                     -discountAmount,
                     isDark,
                     isNeg: true,
+                    compact: compact,
                   ),
-                const Divider(height: 16),
-                _totalRow('Total', total, isDark, isBold: true),
-                const SizedBox(height: 16),
-
+                Divider(height: compact ? 12 : 16),
+                _totalRow(
+                  'Total',
+                  total,
+                  isDark,
+                  isBold: true,
+                  compact: compact,
+                ),
+                SizedBox(height: compact ? 10 : 14),
                 // Payment buttons
                 Row(
                   children: [
@@ -1181,20 +1227,23 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                       'Cash',
                       Icons.payments_rounded,
                       AppColors.success,
+                      compact,
                       () => _completeBill('CASH', total, cart, user),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: compact ? 6 : 8),
                     _paymentButton(
                       'UPI',
                       Icons.qr_code_rounded,
                       AppColors.info,
+                      compact,
                       () => _completeBill('UPI', total, cart, user),
                     ),
-                    const SizedBox(width: 8),
+                    SizedBox(width: compact ? 6 : 8),
                     _paymentButton(
                       'Card',
                       Icons.credit_card_rounded,
                       AppColors.warning,
+                      compact,
                       () => _completeBill('CARD', total, cart, user),
                     ),
                   ],
@@ -1212,6 +1261,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     bool isDark, {
     bool isBold = false,
     bool isNeg = false,
+    bool compact = false,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
@@ -1221,7 +1271,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           Text(
             label,
             style: GoogleFonts.inter(
-              fontSize: isBold ? 16 : 13,
+              fontSize: isBold
+                  ? (compact ? 14.0 : 16.0)
+                  : (compact ? 11.0 : 13.0),
               fontWeight: isBold ? FontWeight.w800 : FontWeight.w400,
             ),
           ),
@@ -1248,17 +1300,24 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     String label,
     IconData icon,
     Color color,
+    bool compact,
     VoidCallback onTap,
   ) {
     return Expanded(
       child: ElevatedButton.icon(
         onPressed: onTap,
-        icon: Icon(icon, size: 18),
-        label: Text(label),
+        icon: Icon(icon, size: compact ? 14 : 17),
+        label: Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: compact ? 11 : 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
         style: ElevatedButton.styleFrom(
           backgroundColor: color,
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          padding: EdgeInsets.symmetric(vertical: compact ? 10 : 13),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
@@ -1340,7 +1399,6 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final total = cart.fold<double>(0, (sum, ci) => sum + ci.total);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkElevated : AppColors.lightSurface,
         boxShadow: [
@@ -1351,8 +1409,13 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           ),
         ],
       ),
-      child: SafeArea(
-        top: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          16,
+          10,
+          16,
+          10 + MediaQuery.viewPaddingOf(context).bottom,
+        ),
         child: Row(
           children: [
             Column(
@@ -1360,13 +1423,18 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${cart.length} items',
-                  style: GoogleFonts.inter(fontSize: 12),
+                  '${cart.length} item${cart.length == 1 ? '' : 's'}',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    color: isDark
+                        ? AppColors.textWhiteMuted
+                        : AppColors.textDarkMuted,
+                  ),
                 ),
                 Text(
                   '₹${total.toStringAsFixed(0)}',
                   style: GoogleFonts.inter(
-                    fontSize: 20,
+                    fontSize: 16,
                     fontWeight: FontWeight.w800,
                     color: isDark
                         ? AppColors.primaryAmber
@@ -1378,13 +1446,21 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
             const Spacer(),
             ElevatedButton.icon(
               onPressed: () => _showBillingSheet(user),
-              icon: const Icon(Icons.receipt_long_rounded, size: 18),
-              label: const Text('View Bill'),
+              icon: const Icon(Icons.receipt_long_rounded, size: 15),
+              label: Text(
+                'View Bill',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 14,
+                  horizontal: 16,
+                  vertical: 10,
                 ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
             ),
           ],
@@ -1435,29 +1511,35 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     final totalQty = cart.fold<int>(0, (sum, ci) => sum + ci.qty);
     final subtotal = cart.fold<double>(0, (sum, ci) => sum + ci.total);
 
+    final mq = MediaQuery.of(context);
+    final sw = mq.size.width;
+    final isNarrow = sw < 400;
+    // Position overlay above the compact panel (~50dp content + 10+10 padding + nav bar)
+    final panelH = 70 + mq.viewPadding.bottom;
+
     return Positioned(
-      bottom: 100,
-      left: 0,
-      right: 0,
+      bottom: panelH + 8,
+      left: sw * 0.08,
+      right: sw * 0.08,
       child: Center(
         child:
             AnimatedContainer(
                   duration: const Duration(milliseconds: 400),
                   curve: Curves.elasticOut,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isNarrow ? 12 : 16,
+                    vertical: isNarrow ? 8 : 10,
                   ),
                   decoration: BoxDecoration(
                     gradient: const LinearGradient(
                       colors: [AppColors.primaryAmber, AppColors.primaryOrange],
                     ),
-                    borderRadius: BorderRadius.circular(25),
+                    borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: AppColors.primaryOrange.withValues(alpha: 0.4),
-                        blurRadius: 20,
-                        offset: const Offset(0, 10),
+                        color: AppColors.primaryOrange.withValues(alpha: 0.35),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
                       ),
                     ],
                   ),
@@ -1469,7 +1551,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Container(
-                            padding: const EdgeInsets.all(4),
+                            padding: const EdgeInsets.all(3),
                             decoration: const BoxDecoration(
                               color: Colors.white,
                               shape: BoxShape.circle,
@@ -1477,16 +1559,19 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                             child: const Icon(
                               Icons.shopping_basket_rounded,
                               color: AppColors.primaryOrange,
-                              size: 16,
+                              size: 13,
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Text(
-                            'Added ${_lastAddedItemName ?? 'Item'}',
-                            style: GoogleFonts.inter(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                              fontSize: 14,
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              'Added ${_lastAddedItemName ?? 'Item'}',
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: isNarrow ? 11 : 12,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
@@ -1498,8 +1583,8 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                         curve: Curves.easeInOut,
                         child: _isCartExpanded
                             ? Container(
-                                padding: const EdgeInsets.only(top: 12),
-                                margin: const EdgeInsets.only(top: 10),
+                                padding: const EdgeInsets.only(top: 8),
+                                margin: const EdgeInsets.only(top: 8),
                                 decoration: BoxDecoration(
                                   border: Border(
                                     top: BorderSide(
@@ -1524,34 +1609,36 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                                               color: Colors.white.withValues(
                                                 alpha: 0.8,
                                               ),
-                                              fontSize: 10,
+                                              fontSize: 9,
                                               fontWeight: FontWeight.w800,
-                                              letterSpacing: 0.5,
+                                              letterSpacing: 0.4,
                                             ),
                                           ),
                                           Text(
                                             '₹${subtotal.toStringAsFixed(0)} total',
                                             style: GoogleFonts.inter(
                                               color: Colors.white,
-                                              fontSize: 12,
+                                              fontSize: isNarrow ? 10 : 11,
                                               fontWeight: FontWeight.w900,
                                             ),
                                           ),
                                         ],
                                       ),
-                                      const SizedBox(width: 30),
+                                      const SizedBox(width: 16),
                                       Text(
-                                        'VIEW Bill',
+                                        'VIEW BILL',
                                         style: GoogleFonts.inter(
                                           color: Colors.white,
-                                          fontSize: 11,
+                                          fontSize: isNarrow ? 9 : 10,
                                           fontWeight: FontWeight.w900,
+                                          letterSpacing: 0.3,
                                         ),
                                       ),
+                                      const SizedBox(width: 2),
                                       const Icon(
                                         Icons.arrow_forward_ios_rounded,
                                         color: Colors.white,
-                                        size: 10,
+                                        size: 9,
                                       ),
                                     ],
                                   ),
