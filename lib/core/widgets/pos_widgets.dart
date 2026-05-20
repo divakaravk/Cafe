@@ -184,138 +184,149 @@ class CartItemRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Dismissible(
-      key: ValueKey('${cartItem.item.id}_${cartItem.variant?.id ?? 'none'}'),
-      direction: DismissDirection.endToStart,
-      onDismissed: (_) => onRemove(),
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 16),
-        decoration: BoxDecoration(
-          color: AppColors.error.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: const Icon(Icons.delete_outline, color: AppColors.error),
-      ),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-        decoration: BoxDecoration(
-          color: isDark
-              ? AppColors.darkCard.withValues(alpha: 0.8)
-              : AppColors.lightCard.withValues(alpha: 0.8),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isDark
-                ? AppColors.darkBorder.withValues(alpha: 0.1)
-                : AppColors.lightBorder.withValues(alpha: 0.2),
-            width: 1,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final compact = w < 320;
+        final imgSz = compact ? 32.0 : 38.0;
+        final pad = compact ? 7.0 : 10.0;
+        final nameSz = compact ? 11.0 : 13.0;
+        final qtySz = compact ? 11.0 : 13.0;
+        final qtyHPad = compact ? 6.0 : 8.0;
+        final amtW = compact ? 46.0 : 54.0;
+        final amtSz = compact ? 11.0 : 12.0;
+        final gap = compact ? 8.0 : 10.0;
+
+        return Dismissible(
+          key: ValueKey('${cartItem.item.id}_${cartItem.variant?.id ?? 'none'}'),
+          direction: DismissDirection.endToStart,
+          onDismissed: (_) => onRemove(),
+          background: Container(
+            alignment: Alignment.centerRight,
+            padding: const EdgeInsets.only(right: 12),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.delete_outline,
+                color: AppColors.error, size: 18),
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            // Variant image
-            Container(
-              width: 44,
-              height: 44,
-              margin: const EdgeInsets.only(right: 12),
-              decoration: BoxDecoration(
+          child: Container(
+            padding: EdgeInsets.all(pad),
+            margin: EdgeInsets.symmetric(vertical: compact ? 2 : 3, horizontal: 2),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? AppColors.darkCard.withValues(alpha: 0.8)
+                  : AppColors.lightCard.withValues(alpha: 0.8),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
                 color: isDark
-                    ? Colors.white.withValues(alpha: 0.06)
-                    : Colors.grey.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.05)
-                      : Colors.black.withValues(alpha: 0.05),
-                ),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: _buildCartItemImage(isDark, cartItem),
+                    ? AppColors.darkBorder.withValues(alpha: 0.1)
+                    : AppColors.lightBorder.withValues(alpha: 0.2),
               ),
             ),
-
-            // Item name
-            Expanded(
-              flex: 3,
-              child: Text(
-                cartItem.itemName,
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? AppColors.textWhite : AppColors.textDark,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-
-            // Quantity controls
-            Container(
-              padding: const EdgeInsets.all(2),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? AppColors.darkBg.withValues(alpha: 0.6)
-                    : AppColors.lightBg.withValues(alpha: 0.7),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: isDark
-                      ? AppColors.darkBorder.withValues(alpha: 0.2)
-                      : AppColors.lightBorder.withValues(alpha: 0.3),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _QtyButton(
-                    icon: Icons.remove,
-                    onTap: onDecrement,
-                    isDark: isDark,
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Text(
-                      '${cartItem.qty}',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
+            child: Row(
+              children: [
+                // Image
+                Container(
+                  width: imgSz,
+                  height: imgSz,
+                  margin: EdgeInsets.only(right: gap),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.06)
+                        : Colors.grey.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.05)
+                          : Colors.black.withValues(alpha: 0.05),
                     ),
                   ),
-                  _QtyButton(
-                    icon: Icons.add,
-                    onTap: onIncrement,
-                    isDark: isDark,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: _buildCartItemImage(isDark, cartItem),
                   ),
-                ],
-              ),
-            ),
-
-            const SizedBox(width: 12),
-
-            // Amount
-            SizedBox(
-              width: 60,
-              child: Text(
-                '₹${cartItem.total.toStringAsFixed(0)}',
-                textAlign: TextAlign.right,
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
                 ),
-              ),
+
+                // Item name
+                Expanded(
+                  child: Text(
+                    cartItem.itemName,
+                    style: GoogleFonts.inter(
+                      fontSize: nameSz,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? AppColors.textWhite : AppColors.textDark,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+
+                SizedBox(width: gap),
+
+                // Qty controls
+                Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? AppColors.darkBg.withValues(alpha: 0.6)
+                        : AppColors.lightBg.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isDark
+                          ? AppColors.darkBorder.withValues(alpha: 0.2)
+                          : AppColors.lightBorder.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _QtyButton(
+                        icon: Icons.remove,
+                        onTap: onDecrement,
+                        isDark: isDark,
+                        compact: compact,
+                      ),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: qtyHPad),
+                        child: Text(
+                          '${cartItem.qty}',
+                          style: GoogleFonts.inter(
+                            fontSize: qtySz,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      _QtyButton(
+                        icon: Icons.add,
+                        onTap: onIncrement,
+                        isDark: isDark,
+                        compact: compact,
+                      ),
+                    ],
+                  ),
+                ),
+
+                SizedBox(width: gap),
+
+                // Amount
+                SizedBox(
+                  width: amtW,
+                  child: Text(
+                    '₹${cartItem.total.toStringAsFixed(0)}',
+                    textAlign: TextAlign.right,
+                    style: GoogleFonts.inter(
+                      fontSize: amtSz,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 
@@ -328,20 +339,12 @@ class CartItemRow extends StatelessWidget {
         fit: BoxFit.cover,
         width: 36,
         height: 36,
+        fadeInDuration: const Duration(milliseconds: 200),
+        fadeOutDuration: const Duration(milliseconds: 100),
         placeholder: (context, url) => Container(
           color: isDark
-              ? Colors.white.withValues(alpha: 0.05)
-              : Colors.black.withValues(alpha: 0.05),
-          child: const Center(
-            child: SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: AppColors.primaryAmber,
-              ),
-            ),
-          ),
+              ? Colors.white.withValues(alpha: 0.07)
+              : Colors.black.withValues(alpha: 0.06),
         ),
         errorWidget: (_, __, ___) => const Center(
           child: Icon(Icons.fastfood_rounded, size: 18, color: Colors.grey),
@@ -358,23 +361,27 @@ class _QtyButton extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final bool isDark;
+  final bool compact;
 
   const _QtyButton({
     required this.icon,
     required this.onTap,
     required this.isDark,
+    this.compact = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final p = compact ? 4.0 : 5.0;
+    final sz = compact ? 13.0 : 15.0;
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(6),
         child: Padding(
-          padding: const EdgeInsets.all(6),
-          child: Icon(icon, size: 16),
+          padding: EdgeInsets.all(p),
+          child: Icon(icon, size: sz),
         ),
       ),
     );
@@ -498,14 +505,16 @@ class CategoryCard extends StatelessWidget {
                       imageUrl: imageUrl!,
                       height: 40,
                       width: 40,
-                      placeholder: (context, url) => const SizedBox(
+                      fadeInDuration: const Duration(milliseconds: 200),
+                      fadeOutDuration: const Duration(milliseconds: 100),
+                      placeholder: (context, url) => Container(
                         width: 40,
                         height: 40,
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: AppColors.primaryAmber,
-                          ),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.07)
+                              : Colors.black.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
                       errorWidget: (_, __, ___) =>
@@ -617,16 +626,12 @@ class ItemVariantRow extends StatelessWidget {
                         child: CachedNetworkImage(
                           imageUrl: imageUrl!,
                           fit: BoxFit.cover,
+                          fadeInDuration: const Duration(milliseconds: 200),
+                          fadeOutDuration: const Duration(milliseconds: 100),
                           placeholder: (context, url) => Container(
                             color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.black.withValues(alpha: 0.05),
-                            child: const Center(
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.primaryAmber,
-                              ),
-                            ),
+                                ? Colors.white.withValues(alpha: 0.07)
+                                : Colors.black.withValues(alpha: 0.06),
                           ),
                           errorWidget: (_, __, ___) =>
                               const Icon(Icons.fastfood_rounded),
@@ -827,16 +832,12 @@ class SimpleVariantTile extends StatelessWidget {
                             child: CachedNetworkImage(
                               imageUrl: imageUrl!,
                               fit: BoxFit.cover,
+                              fadeInDuration: const Duration(milliseconds: 200),
+                              fadeOutDuration: const Duration(milliseconds: 100),
                               placeholder: (context, url) => Container(
                                 color: isDark
-                                    ? Colors.white.withValues(alpha: 0.05)
-                                    : Colors.black.withValues(alpha: 0.05),
-                                child: const Center(
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppColors.primaryAmber,
-                                  ),
-                                ),
+                                    ? Colors.white.withValues(alpha: 0.07)
+                                    : Colors.black.withValues(alpha: 0.06),
                               ),
                               errorWidget: (_, __, ___) => const Center(
                                 child: Icon(

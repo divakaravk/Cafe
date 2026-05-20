@@ -1,5 +1,6 @@
 import 'dart:math' show min;
 import 'package:cafe/core/services/supabase_service.dart';
+import 'package:cafe/core/utils/api_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1795,20 +1796,19 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     if (_selectedTable == null) return;
     setState(() => _isProcessingAI = true);
     try {
-      await SupabaseService.checkoutTable(
-        tableId: _selectedTable!.id,
-        paymentMode: _checkoutPaymentMode,
-        discountPercent: _checkoutDiscount,
+      await safeApiCall(
+        () => SupabaseService.checkoutTable(
+          tableId: _selectedTable!.id,
+          paymentMode: _checkoutPaymentMode,
+          discountPercent: _checkoutDiscount,
+        ),
+        timeout: const Duration(seconds: 20),
       );
       ref.invalidate(tablesProvider(widget.companyId));
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Payment complete — ${_selectedTable?.tableName} • ₹${finalTotal.toStringAsFixed(0)}',
-            ),
-            backgroundColor: AppColors.success,
-          ),
+        AppFeedback.success(
+          context,
+          'Payment complete — ${_selectedTable?.tableName} • ₹${finalTotal.toStringAsFixed(0)}',
         );
         setState(() {
           _selectedTable = null;
@@ -1817,11 +1817,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
         });
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Checkout error: $e'), backgroundColor: AppColors.error),
-        );
-      }
+      if (mounted) AppFeedback.error(context, e, onRetry: () => _doCheckout(finalTotal));
     } finally {
       if (mounted) setState(() => _isProcessingAI = false);
     }
@@ -1838,25 +1834,21 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     setState(() => _isProcessingAI = true);
 
     try {
-      // Creates table_session + open bill + bill_items + KOT in one flow
-      await SupabaseService.saveOrderWithKot(
-        companyId: user.companyId,
-        tableId: _selectedTable!.id,
-        openedBy: user.id,
-        cart: cart,
+      await safeApiCall(
+        () => SupabaseService.saveOrderWithKot(
+          companyId: user.companyId,
+          tableId: _selectedTable!.id,
+          openedBy: user.id,
+          cart: cart,
+        ),
+        timeout: const Duration(seconds: 25),
       );
 
-      // Clear cart, refresh table list so occupied status shows from DB
       ref.read(cartProvider(_selectedTable!.id).notifier).clear();
       ref.invalidate(tablesProvider(widget.companyId));
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('KOT sent to kitchen — ${_selectedTable?.tableName}'),
-            backgroundColor: AppColors.success,
-          ),
-        );
+        AppFeedback.success(context, 'KOT sent to kitchen — ${_selectedTable?.tableName}');
         setState(() {
           _selectedTable = null;
           _selectedCategory = null;
@@ -1868,14 +1860,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       }
     } catch (e, st) {
       debugPrint('SAVE_ORDER_ERROR: $e\n$st');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
+      if (mounted) AppFeedback.error(context, e, onRetry: _saveOrder);
     } finally {
       if (mounted) setState(() => _isProcessingAI = false);
     }
@@ -2491,69 +2476,59 @@ class _TableBillingSheetState extends ConsumerState<_TableBillingSheet> {
     final total = subtotal - discountAmount;
 
     try {
-      // 1. Create or Get Table Session
-      final session = await SupabaseService.createOrder(
-        companyId: widget.user.companyId,
-        tableId: widget.table.id,
-        openedBy: widget.user.id,
+      final session = await safeApiCall(
+        () => SupabaseService.createOrder(
+          companyId: widget.user.companyId,
+          tableId: widget.table.id,
+          openedBy: widget.user.id,
+        ),
       );
 
-      // 2. Create Bill (also frees the table in DB)
-      await SupabaseService.createBill(
-        companyId: widget.user.companyId,
-        billedBy: widget.user.id,
-        tableSessionId: session['id'],
-        subtotal: subtotal,
-        discountAmount: discountAmount,
-        discountType: 'percent',
-        totalAmount: total,
-        paymentMode: _paymentMode,
-        billType: 'dine_in',
-        billItems: widget.cart
-            .map(
-              (ci) => {
-                'item_id': ci.item.id,
-                'variant_id': ci.variant?.id,
-                'qty': ci.qty,
-                'rate': ci.rate,
-                'item_name': ci.itemName,
-                'hsn_code': ci.variant?.hsnCode ?? ci.item.hsnCode,
-                'gst_rate': ci.variant?.gstRate ?? ci.item.gstRate,
-                'is_taxable': ci.item.isTaxable,
-                'discount_item': 0,
-                'notes': ci.notes,
-              },
-            )
-            .toList(),
+      await safeApiCall(
+        () => SupabaseService.createBill(
+          companyId: widget.user.companyId,
+          billedBy: widget.user.id,
+          tableSessionId: session['id'],
+          subtotal: subtotal,
+          discountAmount: discountAmount,
+          discountType: 'percent',
+          totalAmount: total,
+          paymentMode: _paymentMode,
+          billType: 'dine_in',
+          billItems: widget.cart
+              .map(
+                (ci) => {
+                  'item_id': ci.item.id,
+                  'variant_id': ci.variant?.id,
+                  'qty': ci.qty,
+                  'rate': ci.rate,
+                  'item_name': ci.itemName,
+                  'hsn_code': ci.variant?.hsnCode ?? ci.item.hsnCode,
+                  'gst_rate': ci.variant?.gstRate ?? ci.item.gstRate,
+                  'is_taxable': ci.item.isTaxable,
+                  'discount_item': 0,
+                  'notes': ci.notes,
+                },
+              )
+              .toList(),
+        ),
+        timeout: const Duration(seconds: 20),
       );
 
-      // 3. Clear Table Cart and refresh table grid
       ref.read(cartProvider(widget.table.id).notifier).clear();
       ref.read(discountProvider.notifier).reset();
       ref.invalidate(tablesProvider(widget.user.companyId));
 
       if (mounted) {
-        Navigator.pop(context); // Close sheet
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Bill created for ${widget.table.tableName} • ₹${total.toStringAsFixed(0)}',
-            ),
-            backgroundColor: AppColors.success,
-          ),
+        Navigator.pop(context);
+        AppFeedback.success(
+          context,
+          'Bill created — ${widget.table.tableName} • ₹${total.toStringAsFixed(0)}',
         );
       }
     } catch (e, st) {
-      debugPrint('COMPLETE_BILL_ERROR: $e');
-      debugPrint(st.toString());
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
+      debugPrint('COMPLETE_BILL_ERROR: $e\n$st');
+      if (mounted) AppFeedback.error(context, e, onRetry: _completeTableBill);
     } finally {
       if (mounted) setState(() => _isProcessing = false);
     }

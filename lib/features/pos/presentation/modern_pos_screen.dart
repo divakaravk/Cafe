@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/utils/api_helper.dart';
 import '../../../core/widgets/pos_widgets.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
@@ -232,8 +233,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                         isDark,
                         isTablet,
                       ),
-                      loading: () =>
-                          const Center(child: CircularProgressIndicator()),
+                      loading: () => _buildSkeletonGrid(isDark),
                       error: (e, _) =>
                           Center(child: Text('Error loading items: $e')),
                     ),
@@ -599,6 +599,86 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
             ),
           ),
       ],
+    );
+  }
+
+  // ─── SKELETON LOADING GRID ──────────────────────────────
+  Widget _buildSkeletonGrid(bool isDark) {
+    final cols = _gridCols(MediaQuery.sizeOf(context).width);
+    final base = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : Colors.black.withValues(alpha: 0.06);
+    final highlight = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.black.withValues(alpha: 0.11);
+
+    Widget shimmerBox({double? width, double? height, double radius = 6}) {
+      return Container(
+            width: width,
+            height: height,
+            decoration: BoxDecoration(
+              color: base,
+              borderRadius: BorderRadius.circular(radius),
+            ),
+          )
+          .animate(onPlay: (c) => c.repeat())
+          .shimmer(
+            duration: const Duration(milliseconds: 1200),
+            color: highlight,
+          );
+    }
+
+    Widget skeletonCard() {
+      return Container(
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkCard : AppColors.lightCard,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isDark
+                ? AppColors.darkBorder.withValues(alpha: 0.12)
+                : AppColors.lightBorder.withValues(alpha: 0.2),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image placeholder
+            Expanded(
+              flex: 3,
+              child: shimmerBox(width: double.infinity, radius: 13),
+            ),
+            // Text placeholders
+            Expanded(
+              flex: 2,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    shimmerBox(width: double.infinity, height: 8),
+                    const SizedBox(height: 6),
+                    shimmerBox(width: 40, height: 8),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GridView.builder(
+      padding: const EdgeInsets.all(16),
+      physics: const NeverScrollableScrollPhysics(),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: cols,
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 0.85,
+      ),
+      itemCount: cols * 4, // enough rows to fill the screen
+      itemBuilder: (_, __) => skeletonCard(),
     );
   }
 
@@ -1337,60 +1417,42 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     final discountAmount = subtotal * (discount / 100);
 
     try {
-      await SupabaseService.createBill(
-        companyId: user.companyId,
-        billedBy: user.id,
-        subtotal: subtotal,
-        discountAmount: discountAmount,
-        totalAmount: total,
-        paymentMode: paymentMode,
-        billItems: cart
-            .map(
-              (ci) => {
-                'item_id': ci.item.id,
-                'variant_id': ci.variant?.id,
-                'qty': ci.qty,
-                'rate': ci.rate,
-                'item_name': ci.itemName,
-                'hsn_code': ci.variant?.hsnCode ?? ci.item.hsnCode,
-                'gst_rate': ci.variant?.gstRate ?? ci.item.gstRate,
-                'is_taxable': ci.item.isTaxable,
-                'discount_item': 0,
-                'notes': ci.notes,
-              },
-            )
-            .toList(),
+      await safeApiCall(
+        () => SupabaseService.createBill(
+          companyId: user.companyId,
+          billedBy: user.id,
+          subtotal: subtotal,
+          discountAmount: discountAmount,
+          totalAmount: total,
+          paymentMode: paymentMode,
+          billItems: cart
+              .map(
+                (ci) => {
+                  'item_id': ci.item.id,
+                  'variant_id': ci.variant?.id,
+                  'qty': ci.qty,
+                  'rate': ci.rate,
+                  'item_name': ci.itemName,
+                  'hsn_code': ci.variant?.hsnCode ?? ci.item.hsnCode,
+                  'gst_rate': ci.variant?.gstRate ?? ci.item.gstRate,
+                  'is_taxable': ci.item.isTaxable,
+                  'discount_item': 0,
+                  'notes': ci.notes,
+                },
+              )
+              .toList(),
+        ),
+        timeout: const Duration(seconds: 20),
       );
 
       ref.read(cartProvider(null).notifier).clear();
       ref.read(discountProvider.notifier).reset();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  'Bill created • ₹${total.toStringAsFixed(0)} via $paymentMode',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w500),
-                ),
-              ],
-            ),
-            backgroundColor: AppColors.success,
-          ),
-        );
+        AppFeedback.success(context, 'Bill created • ₹${total.toStringAsFixed(0)} via $paymentMode');
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
+      if (mounted) AppFeedback.error(context, e);
     }
   }
 
@@ -1505,7 +1567,6 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   }
 
   Widget _buildCartAnimationOverlay(List<CartItem> cart, UserProfile user) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     if (cart.isEmpty) return const SizedBox.shrink();
 
     final totalQty = cart.fold<int>(0, (sum, ci) => sum + ci.qty);

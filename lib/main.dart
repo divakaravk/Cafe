@@ -28,10 +28,10 @@ class CafePosApp extends ConsumerWidget {
       statusBarColor: Colors.transparent,
       systemNavigationBarColor: Colors.transparent,
       systemNavigationBarDividerColor: Colors.transparent,
-      statusBarIconBrightness:
-          isDark ? Brightness.light : Brightness.dark,
-      systemNavigationBarIconBrightness:
-          isDark ? Brightness.light : Brightness.dark,
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarIconBrightness: isDark
+          ? Brightness.light
+          : Brightness.dark,
     );
 
     return AnnotatedRegion<SystemUiOverlayStyle>(

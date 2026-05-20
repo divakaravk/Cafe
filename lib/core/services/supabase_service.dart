@@ -321,51 +321,42 @@ class SupabaseService {
 
   static Future<String> _generateBillNumber(String companyId) async {
     final now = DateTime.now();
-
-    // Financial Year Calculation (April to March)
-    String fy;
-    if (now.month >= 4) {
-      fy = "${now.year}-${(now.year + 1) % 100}";
-    } else {
-      fy = "${now.year - 1}-${(now.year) % 100}";
-    }
+    final fy = now.month >= 4
+        ? "${now.year}-${(now.year + 1) % 100}"
+        : "${now.year - 1}-${now.year % 100}";
 
     try {
-      // Fetch company code (prefix)
-      final companyRes = await client
-          .from('company_master')
-          .select('company_code')
-          .eq('id', companyId)
-          .maybeSingle();
+      // Parallel: fetch company code + latest bill number in one shot
+      final fyStart = DateTime(now.month >= 4 ? now.year : now.year - 1, 4, 1);
+      final results = await Future.wait([
+        client
+            .from('company_master')
+            .select('company_code')
+            .eq('id', companyId)
+            .maybeSingle(),
+        client
+            .from('bill_master')
+            .select('bill_number')
+            .eq('company_id', companyId)
+            .gte('bill_date', fyStart.toIso8601String())
+            .order('bill_date', ascending: false)
+            .limit(1),
+      ]);
 
-      String prefix = companyRes?['company_code'] ?? 'POS';
+      String prefix = (results[0] as Map?)?['company_code'] ?? 'POS';
       if (prefix.isEmpty) prefix = 'POS';
 
-      // Find the latest bill number for this company and FY
-      // We order by bill_date to get the most recent one, which should have the highest sequence
-      final latestBillRes = await client
-          .from('bill_master')
-          .select('bill_number')
-          .eq('company_id', companyId)
-          .ilike('bill_number', '$prefix/$fy/%')
-          .order('bill_date', ascending: false)
-          .limit(1);
-
       int sequence = 1;
-      if (latestBillRes != null && (latestBillRes as List).isNotEmpty) {
-        final latestBillNumber = latestBillRes[0]['bill_number'] as String;
-        final parts = latestBillNumber.split('/');
-        if (parts.length == 3) {
-          final lastPart = parts[2];
-          // Try to parse the sequence, default to current bills count if parsing fails
-          sequence = (int.tryParse(lastPart) ?? 0) + 1;
-        }
+      final latestBills = results[1] as List;
+      if (latestBills.isNotEmpty) {
+        final parts = (latestBills[0]['bill_number'] as String).split('/');
+        if (parts.length == 3) sequence = (int.tryParse(parts[2]) ?? 0) + 1;
       }
 
       return '$prefix/$fy/${sequence.toString().padLeft(3, '0')}';
-    } catch (e) {
-      // Fallback in case of any database errors
-      return 'BILL/${now.year}${now.month}${now.day}/${now.millisecondsSinceEpoch.toString().substring(now.millisecondsSinceEpoch.toString().length - 4)}';
+    } catch (_) {
+      final ts = now.millisecondsSinceEpoch.toString();
+      return 'BILL/${now.year}${now.month.toString().padLeft(2,'0')}${now.day.toString().padLeft(2,'0')}/${ts.substring(ts.length - 4)}';
     }
   }
 
@@ -632,7 +623,7 @@ class SupabaseService {
 
     // 2. Calculate taxes and build bill_items payload
     double subtotal = 0, totalCgst = 0, totalSgst = 0;
-    final billItemsData = (cart as List).map((ci) {
+    final billItemsData = cart.map((ci) {
       final cartItem = ci as dynamic;
       final qty = (cartItem.qty as int).toDouble();
       final rate = (cartItem.rate as double);
@@ -711,17 +702,18 @@ class SupabaseService {
       billId = bill['id'] as String;
     }
 
-    // 4. Insert bill_items and retrieve IDs
+    // 4. Insert bill_items and generate KOT number in parallel
     for (final item in billItemsData) {
       item['bill_id'] = billId;
     }
-    final insertedItems = await client
-        .from('bill_item')
-        .insert(billItemsData)
-        .select('id, item_id, variant_id');
+    final step4 = await Future.wait<dynamic>([
+      client.from('bill_item').insert(billItemsData).select('id, item_id, variant_id'),
+      _generateKotNumber(companyId),
+    ]);
+    final insertedItems = step4[0] as List;
+    final kotNumber = step4[1] as String;
 
     // 5. Create kot_master
-    final kotNumber = await _generateKotNumber(companyId);
     final kot = await client
         .from('kot_master')
         .insert({
@@ -737,8 +729,8 @@ class SupabaseService {
     final kotId = kot['id'] as String;
 
     // 6. Create kot_items linked to bill_items
-    final cartList = cart as List;
-    final kotItems = (insertedItems as List).map((bi) {
+    final cartList = cart;
+    final kotItems = insertedItems.map((bi) {
       final idx = cartList.indexWhere((ci) {
         final c = ci as dynamic;
         return c.item.id == bi['item_id'] && c.variant?.id == bi['variant_id'];
@@ -748,7 +740,7 @@ class SupabaseService {
         'kot_id': kotId,
         'bill_item_id': bi['id'],
         'qty': cartItem != null ? (cartItem.qty as num).toDouble() : 1.0,
-        'notes': cartItem != null ? cartItem.notes : null,
+        'notes': cartItem?.notes,
         'status': 'pending',
       };
     }).toList();

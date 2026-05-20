@@ -4,7 +4,10 @@
       "WebSearch",
       "WebFetch(domain:medium.com)",
       "WebFetch(domain:www.petpooja.com)",
-      "Bash(flutter analyze *)"
+      "Bash(flutter analyze *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)"
     ]
   }
 }
