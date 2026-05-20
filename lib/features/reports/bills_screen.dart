@@ -3,9 +3,14 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
 import '../../core/theme/app_colors.dart';
 import '../../models/models.dart';
 import '../../providers/report_provider.dart';
+import '../../providers/providers.dart' show allItemsProvider;
 import 'widgets/report_widgets.dart';
 
 class BillsScreen extends ConsumerStatefulWidget {
@@ -17,9 +22,9 @@ class BillsScreen extends ConsumerStatefulWidget {
 }
 
 class _BillsScreenState extends ConsumerState<BillsScreen> {
-  final ScrollController _scrollController = ScrollController();
-  bool _isExpanded = false;
   String _selectedTrendMetric = 'revenue'; // 'revenue' or 'count'
+  String _searchQuery = '';
+  String _selectedPaymentFilter = 'ALL'; // 'ALL', 'CASH', 'UPI', 'CARD'
 
   @override
   Widget build(BuildContext context) {
@@ -27,158 +32,528 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
     final reportState = ref.watch(reportProvider(widget.companyId));
     final reportNotifier = ref.read(reportProvider(widget.companyId).notifier);
     final dateFormat = DateFormat('dd MMM, hh:mm a');
+    final itemsAsync = ref.watch(allItemsProvider(widget.companyId));
 
-    return Scaffold(
-      backgroundColor: isDark ? AppColors.darkBg : AppColors.lightBg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header
-            _buildHeader(context, isDark, reportNotifier),
+    // Map item category
+    final Map<String, String> itemToCategory = {};
+    if (itemsAsync.hasValue) {
+      for (final item in itemsAsync.value!) {
+        itemToCategory[item.id] = item.sectionLabel ?? 'Uncategorized';
+      }
+    }
 
-            // Date Filters
-            _buildFilters(isDark, reportState, reportNotifier),
+    // Category Sales
+    final Map<String, double> categorySales = {};
+    for (var bill in reportState.bills) {
+      for (var item in bill.items) {
+        final category = itemToCategory[item.itemId] ?? 'Uncategorized';
+        categorySales[category] = (categorySales[category] ?? 0.0) + item.total;
+      }
+    }
 
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: () => reportNotifier.fetchReport(),
-                child: ListView(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 10,
-                  ),
-                  children: [
-                    // Summary Cards
-                    _buildSummaryMetrics(reportState, isDark),
+    // Top Items
+    final Map<String, int> itemQuantities = {};
+    final Map<String, double> itemRevenues = {};
+    for (var bill in reportState.bills) {
+      for (var item in bill.items) {
+        final name = item.itemName ?? 'Unknown Item';
+        itemQuantities[name] = (itemQuantities[name] ?? 0) + item.qty.toInt();
+        itemRevenues[name] = (itemRevenues[name] ?? 0) + item.total;
+      }
+    }
 
-                    const SizedBox(height: 24),
+    // Hourly sales
+    final Map<int, double> hourlySales = {};
+    for (var bill in reportState.bills) {
+      if (bill.createdAt == null) continue;
+      final hour = bill.createdAt!.toLocal().hour;
+      hourlySales[hour] = (hourlySales[hour] ?? 0) + bill.totalAmount;
+    }
 
-                    // Charts Section
-                    _buildChartsSection(reportState, isDark),
+    // Total tax and discount
+    final totalTax = reportState.bills.fold<double>(
+      0.0,
+      (sum, b) => sum + b.taxAmount,
+    );
+    final totalDiscount = reportState.bills.fold<double>(
+      0.0,
+      (sum, b) => sum + b.discountAmount,
+    );
+    final aov = reportState.totalOrders > 0
+        ? reportState.totalRevenue / reportState.totalOrders
+        : 0.0;
 
-                    const SizedBox(height: 32),
+    // Filter bills for ledger
+    final filteredBills = reportState.bills.where((bill) {
+      final matchesSearch =
+          bill.billNumber?.toLowerCase().contains(_searchQuery.toLowerCase()) ??
+          false;
+      final matchesPayment =
+          _selectedPaymentFilter == 'ALL' ||
+          bill.paymentMode.toUpperCase() == _selectedPaymentFilter;
+      return matchesSearch && matchesPayment;
+    }).toList();
 
-                    // Bills List Title
-                    Row(
-                      children: [
-                        Text(
-                          'Recent Bills',
-                          style: GoogleFonts.inter(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: isDark ? Colors.white : AppColors.textDark,
-                          ),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '${reportState.bills.length} total',
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            color: isDark
-                                ? AppColors.textWhiteMuted
-                                : AppColors.textDarkMuted,
-                          ),
-                        ),
-                      ],
+    // Insights Highlights
+    String paymentInsight = "";
+    if (reportState.totalRevenue > 0) {
+      final cashShare =
+          (reportState.cashTotal / reportState.totalRevenue) * 100;
+      final upiShare = (reportState.upiTotal / reportState.totalRevenue) * 100;
+      final cardShare =
+          (reportState.cardTotal / reportState.totalRevenue) * 100;
+
+      if (upiShare > cashShare && upiShare > cardShare) {
+        paymentInsight =
+            "UPI is your most popular payment mode, contributing ${upiShare.toStringAsFixed(0)}% of total revenue.";
+      } else if (cashShare > upiShare && cashShare > cardShare) {
+        paymentInsight =
+            "Cash transactions dominate, accounting for ${cashShare.toStringAsFixed(0)}% of total sales.";
+      } else if (cardShare > cashShare && cardShare > upiShare) {
+        paymentInsight =
+            "Card payments are leading, making up ${cardShare.toStringAsFixed(0)}% of sales.";
+      } else {
+        paymentInsight =
+            "Digital payments (UPI/Card) comprise the majority of sales.";
+      }
+    } else {
+      paymentInsight = "No transactions recorded yet for this period.";
+    }
+
+    String hourlyInsight = "";
+    if (hourlySales.isNotEmpty) {
+      final sortedHours = hourlySales.entries.toList()
+        ..sort((a, b) => b.value.compareTo(a.value));
+      final peakHour = sortedHours.first.key;
+      final displayHour = peakHour == 0
+          ? '12 AM'
+          : peakHour == 12
+          ? '12 PM'
+          : peakHour > 12
+          ? '${peakHour - 12} PM'
+          : '$peakHour AM';
+      hourlyInsight =
+          "Peak sales hour is $displayHour, bringing in ₹${sortedHours.first.value.toStringAsFixed(0)}.";
+    } else {
+      hourlyInsight = "Operating hours metrics will load once sales occur.";
+    }
+
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        backgroundColor: isDark ? AppColors.darkBg : AppColors.lightBg,
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Header
+              _buildHeader(
+                context,
+                isDark,
+                reportNotifier,
+                () => _exportReportPdf(context, reportState, itemToCategory),
+              ),
+
+              // Date Filters
+              _buildFilters(isDark, reportState, reportNotifier),
+
+              // TabBar
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 8,
+                ),
+                child: Container(
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.darkSurface : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark
+                          ? AppColors.darkBorder.withValues(alpha: 0.3)
+                          : AppColors.lightBorder.withValues(alpha: 0.5),
                     ),
-                    const SizedBox(height: 16),
-
-                    // Bills List
-                    if (reportState.isLoading)
-                      const Center(child: CircularProgressIndicator())
-                    else if (reportState.bills.isEmpty)
-                      _buildEmptyState(isDark)
-                    else ...[
-                      ...(_isExpanded
-                              ? reportState.bills
-                              : reportState.bills.take(5).toList())
-                          .map(
-                            (bill) =>
-                                _BillCard(
-                                      bill: bill,
-                                      isDark: isDark,
-                                      dateFormat: dateFormat,
-                                      onTap: () => _showBillDetails(
-                                        context,
-                                        bill,
-                                        isDark,
-                                        dateFormat,
-                                      ),
-                                    )
-                                    .animate()
-                                    .fadeIn(duration: 400.ms)
-                                    .slideY(begin: 0.1, end: 0),
-                          ),
-
-                      // Show View All / Show Less button
-                      if (reportState.bills.length > 5)
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 20),
-                          child: Center(
-                            child: InkWell(
-                              onTap: () {
-                                setState(() {
-                                  _isExpanded = !_isExpanded;
-                                });
-                              },
-                              borderRadius: BorderRadius.circular(30),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 24,
-                                  vertical: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: isDark
-                                      ? AppColors.darkElevated
-                                      : Colors.white,
-                                  borderRadius: BorderRadius.circular(30),
-                                  border: Border.all(
-                                    color:
-                                        (isDark
-                                                ? AppColors.primaryAmber
-                                                : AppColors.primaryOrange)
-                                            .withValues(alpha: 0.3),
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      _isExpanded
-                                          ? 'Show Less'
-                                          : 'View All Bills',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w700,
-                                        color: isDark
-                                            ? AppColors.primaryAmber
-                                            : AppColors.primaryOrange,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Icon(
-                                      _isExpanded
-                                          ? Icons.keyboard_arrow_up_rounded
-                                          : Icons.keyboard_arrow_down_rounded,
-                                      size: 20,
-                                      color: isDark
-                                          ? AppColors.primaryAmber
-                                          : AppColors.primaryOrange,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
+                  ),
+                  child: TabBar(
+                    indicatorSize: TabBarIndicatorSize.tab,
+                    dividerColor: Colors.transparent,
+                    indicator: BoxDecoration(
+                      color: isDark
+                          ? AppColors.primaryAmber
+                          : AppColors.primaryOrange,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    labelColor: isDark ? Colors.black : Colors.white,
+                    unselectedLabelColor: isDark
+                        ? AppColors.textWhiteMuted
+                        : AppColors.textDarkMuted,
+                    labelStyle: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    unselectedLabelStyle: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    tabs: const [
+                      Tab(text: 'Overview'),
+                      Tab(text: 'Insights'),
+                      Tab(text: 'Audit Ledger'),
                     ],
+                  ),
+                ),
+              ),
+
+              // TabBarView
+              Expanded(
+                child: TabBarView(
+                  children: [
+                    // Tab 1: Overview Dashboard
+                    _buildOverviewTab(reportState, isDark, paymentInsight),
+
+                    // Tab 2: Product & Category Insights
+                    _buildInsightsTab(
+                      reportState,
+                      isDark,
+                      categorySales,
+                      itemQuantities,
+                      itemRevenues,
+                      hourlyInsight,
+                    ),
+
+                    // Tab 3: Operations & Audit
+                    _buildAuditTab(
+                      context,
+                      reportState,
+                      isDark,
+                      filteredBills,
+                      totalTax,
+                      totalDiscount,
+                      aov,
+                      dateFormat,
+                    ),
                   ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildOverviewTab(
+    ReportState reportState,
+    bool isDark,
+    String paymentInsight,
+  ) {
+    return RefreshIndicator(
+      onRefresh: () =>
+          ref.read(reportProvider(widget.companyId).notifier).fetchReport(),
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        children: [
+          // Summary Cards
+          _buildSummaryMetrics(reportState, isDark),
+          const SizedBox(height: 20),
+
+          // StatInsightCard
+          StatInsightCard(
+            insightText: paymentInsight,
+            icon: Icons.lightbulb_outline_rounded,
+            iconColor: AppColors.primaryAmber,
+            isDark: isDark,
+          ),
+          const SizedBox(height: 20),
+
+          // Charts Section
+          _buildChartsSection(reportState, isDark),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInsightsTab(
+    ReportState reportState,
+    bool isDark,
+    Map<String, double> categorySales,
+    Map<String, int> itemQuantities,
+    Map<String, double> itemRevenues,
+    String hourlyInsight,
+  ) {
+    return RefreshIndicator(
+      onRefresh: () =>
+          ref.read(reportProvider(widget.companyId).notifier).fetchReport(),
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        children: [
+          StatInsightCard(
+            insightText: hourlyInsight,
+            icon: Icons.query_builder_rounded,
+            iconColor: AppColors.accentTeal,
+            isDark: isDark,
+          ),
+          const SizedBox(height: 20),
+
+          // Category sales distribution
+          _buildChartContainer(
+            title: 'Sales by Category',
+            height: 250,
+            isDark: isDark,
+            child: CategoryPieChart(
+              categorySales: categorySales,
+              isDark: isDark,
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Top selling items list
+          _buildChartContainer(
+            title: 'Top Selling Items',
+            height: 250,
+            isDark: isDark,
+            child: SingleChildScrollView(
+              child: TopSellingItemsList(
+                itemQuantities: itemQuantities,
+                itemRevenues: itemRevenues,
+                isDark: isDark,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Table sales
+          _buildChartContainer(
+            title: 'Sales by Table',
+            height: 250,
+            isDark: isDark,
+            child: TableSalesChart(
+              tableSales: reportState.tableSales,
+              isDark: isDark,
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAuditTab(
+    BuildContext context,
+    ReportState reportState,
+    bool isDark,
+    List<Bill> filteredBills,
+    double totalTax,
+    double totalDiscount,
+    double aov,
+    DateFormat dateFormat,
+  ) {
+    return RefreshIndicator(
+      onRefresh: () =>
+          ref.read(reportProvider(widget.companyId).notifier).fetchReport(),
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+        children: [
+          // Busy hours hourly chart
+          _buildChartContainer(
+            title: 'Hourly Sales Peak (Busy Hours)',
+            height: 250,
+            isDark: isDark,
+            child: HourlySalesChart(
+              hourlySales: {
+                for (var bill in reportState.bills)
+                  if (bill.createdAt != null)
+                    bill.createdAt!.toLocal().hour: reportState.bills
+                        .where(
+                          (b) =>
+                              b.createdAt != null &&
+                              b.createdAt!.toLocal().hour ==
+                                  bill.createdAt!.toLocal().hour,
+                        )
+                        .fold<double>(0.0, (sum, b) => sum + b.totalAmount),
+              },
+              isDark: isDark,
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Tax and discounts breakdown card
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkSurface : Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: isDark
+                    ? AppColors.darkBorder.withValues(alpha: 0.3)
+                    : AppColors.lightBorder.withValues(alpha: 0.5),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Tax & Audit Summary',
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : AppColors.textDark,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _detailRow(
+                  'Gross Revenue',
+                  '₹${reportState.totalRevenue.toStringAsFixed(2)}',
+                  isDark,
+                ),
+                _detailRow(
+                  'Gross Subtotal (Before Tax)',
+                  '₹${reportState.totalGrossAmount.toStringAsFixed(2)}',
+                  isDark,
+                ),
+                _detailRow(
+                  'Total Tax Collected (CGST + SGST)',
+                  '₹${totalTax.toStringAsFixed(2)}',
+                  isDark,
+                ),
+                _detailRow(
+                  'Total Discount Offered',
+                  '₹${totalDiscount.toStringAsFixed(2)}',
+                  isDark,
+                  isError: true,
+                ),
+                _detailRow(
+                  'Average Order Value (AOV)',
+                  '₹${aov.toStringAsFixed(2)}',
+                  isDark,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          // Ledger Title and Search
+          Row(
+            children: [
+              Text(
+                'Audit Ledger',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: isDark ? Colors.white : AppColors.textDark,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${filteredBills.length} matched',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: isDark
+                      ? AppColors.textWhiteMuted
+                      : AppColors.textDarkMuted,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Search ledger bar
+          TextField(
+            onChanged: (val) => setState(() => _searchQuery = val),
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: isDark ? Colors.white : AppColors.textDark,
+            ),
+            decoration: InputDecoration(
+              hintText: 'Search bill number...',
+              hintStyle: GoogleFonts.inter(
+                color: isDark
+                    ? AppColors.textWhiteMuted
+                    : AppColors.textDarkMuted,
+              ),
+              prefixIcon: Icon(
+                Icons.search_rounded,
+                color: isDark
+                    ? AppColors.textWhiteMuted
+                    : AppColors.textDarkMuted,
+              ),
+              filled: true,
+              fillColor: isDark ? AppColors.darkSurface : Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                vertical: 0,
+                horizontal: 16,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(
+                  color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                ),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide(
+                  color: isDark
+                      ? AppColors.darkBorder.withValues(alpha: 0.5)
+                      : AppColors.lightBorder.withValues(alpha: 0.5),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Filter chips for payment mode
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: ['ALL', 'CASH', 'UPI', 'CARD'].map((mode) {
+                final isSel = _selectedPaymentFilter == mode;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: ChoiceChip(
+                    label: Text(mode),
+                    selected: isSel,
+                    onSelected: (selected) {
+                      if (selected) {
+                        setState(() => _selectedPaymentFilter = mode);
+                      }
+                    },
+                    labelStyle: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: isSel
+                          ? Colors.white
+                          : (isDark
+                                ? AppColors.textWhiteMuted
+                                : AppColors.textDarkMuted),
+                    ),
+                    selectedColor: isDark
+                        ? AppColors.primaryAmber
+                        : AppColors.primaryOrange,
+                    backgroundColor: isDark
+                        ? AppColors.darkSurface
+                        : Colors.white,
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 16),
+
+          // Bills ledger list
+          if (filteredBills.isEmpty)
+            _buildEmptyState(isDark)
+          else
+            ...filteredBills.map(
+              (bill) => _BillCard(
+                bill: bill,
+                isDark: isDark,
+                dateFormat: dateFormat,
+                onTap: () =>
+                    _showBillDetails(context, bill, isDark, dateFormat),
+              ),
+            ),
+          const SizedBox(height: 40),
+        ],
       ),
     );
   }
@@ -187,6 +562,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
     BuildContext context,
     bool isDark,
     ReportNotifier notifier,
+    VoidCallback onExportPdf,
   ) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -217,6 +593,11 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
             style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w800),
           ),
           const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.picture_as_pdf_rounded),
+            onPressed: onExportPdf,
+            tooltip: 'Export PDF',
+          ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             onPressed: () => notifier.fetchReport(),
@@ -344,44 +725,58 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
   }
 
   Widget _buildSummaryMetrics(ReportState state, bool isDark) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          MetricCard(
-            title: 'Total Revenue',
-            value: '₹${state.totalRevenue.toStringAsFixed(0)}',
-            icon: Icons.account_balance_wallet_rounded,
-            gradient: [const Color(0xFF6A11CB), const Color(0xFF2575FC)],
-            isDark: isDark,
-          ),
-          const SizedBox(width: 16),
-          MetricCard(
-            title: 'Orders Count',
-            value: state.totalOrders.toString(),
-            icon: Icons.shopping_basket_rounded,
-            gradient: [const Color(0xFFFF9A9E), const Color(0xFFFAD0C4)],
-            isDark: isDark,
-          ),
-          const SizedBox(width: 16),
-          MetricCard(
-            title: 'Cash Sales',
-            value: '₹${state.cashTotal.toStringAsFixed(0)}',
-            icon: Icons.payments_rounded,
-            gradient: [const Color(0xFF00B09B), const Color(0xFF96C93D)],
-            isDark: isDark,
-          ),
-          const SizedBox(width: 16),
-          MetricCard(
-            title: 'Digital (UPI/Card)',
-            value: '₹${(state.upiTotal + state.cardTotal).toStringAsFixed(0)}',
-            icon: Icons.qr_code_rounded,
-            gradient: [const Color(0xFFF2994A), const Color(0xFFF2C94C)],
-            isDark: isDark,
-          ),
-        ],
-      ),
-    ).animate().slideX(begin: 0.1, end: 0, duration: 600.ms);
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: MetricCard(
+                title: 'Total Revenue',
+                value: '₹${state.totalRevenue.toStringAsFixed(0)}',
+                icon: Icons.account_balance_wallet_rounded,
+                gradient: const [Color(0xFF6A11CB), Color(0xFF2575FC)],
+                isDark: isDark,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: MetricCard(
+                title: 'Orders Count',
+                value: state.totalOrders.toString(),
+                icon: Icons.shopping_basket_rounded,
+                gradient: const [Color(0xFFFF9A9E), Color(0xFFFAD0C4)],
+                isDark: isDark,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: MetricCard(
+                title: 'Cash Sales',
+                value: '₹${state.cashTotal.toStringAsFixed(0)}',
+                icon: Icons.payments_rounded,
+                gradient: const [Color(0xFF00B09B), Color(0xFF96C93D)],
+                isDark: isDark,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: MetricCard(
+                title: 'Digital (UPI/Card)',
+                value:
+                    '₹${(state.upiTotal + state.cardTotal).toStringAsFixed(0)}',
+                icon: Icons.qr_code_rounded,
+                gradient: const [Color(0xFFF2994A), Color(0xFFF2C94C)],
+                isDark: isDark,
+              ),
+            ),
+          ],
+        ),
+      ],
+    ).animate().slideY(begin: 0.1, end: 0, duration: 600.ms);
   }
 
   Widget _buildChartsSection(ReportState state, bool isDark) {
@@ -659,7 +1054,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                         shape: BoxShape.circle,
                       ),
                       child: Text(
-                        '${bi.qty}x',
+                        '${bi.qty.toStringAsFixed(0)}x',
                         style: GoogleFonts.inter(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
@@ -790,6 +1185,181 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
         return AppColors.warning;
       default:
         return isDark ? AppColors.primaryAmber : AppColors.primaryOrange;
+    }
+  }
+
+  Future<void> _exportReportPdf(
+    BuildContext context,
+    ReportState reportState,
+    Map<String, String> itemToCategory,
+  ) async {
+    final pdf = pw.Document();
+
+    final totalRevenue = reportState.totalRevenue;
+    final totalOrders = reportState.totalOrders;
+    final cashTotal = reportState.cashTotal;
+    final upiTotal = reportState.upiTotal;
+    final cardTotal = reportState.cardTotal;
+    final totalTax = reportState.bills.fold<double>(
+      0.0,
+      (sum, b) => sum + b.taxAmount,
+    );
+    final totalDiscount = reportState.bills.fold<double>(
+      0.0,
+      (sum, b) => sum + b.discountAmount,
+    );
+    final aov = totalOrders > 0 ? totalRevenue / totalOrders : 0.0;
+
+    // Category Sales
+    final Map<String, double> categorySales = {};
+    for (var bill in reportState.bills) {
+      for (var item in bill.items) {
+        final category = itemToCategory[item.itemId] ?? 'Uncategorized';
+        categorySales[category] = (categorySales[category] ?? 0.0) + item.total;
+      }
+    }
+
+    // Top Selling Items
+    final Map<String, int> itemQuantities = {};
+    for (var bill in reportState.bills) {
+      for (var item in bill.items) {
+        final name = item.itemName ?? 'Unknown Item';
+        itemQuantities[name] = (itemQuantities[name] ?? 0) + item.qty.toInt();
+      }
+    }
+    final topItems = itemQuantities.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    final dateRangeStr =
+        reportState.filter == ReportDateFilter.custom &&
+            reportState.startDate != null
+        ? '${DateFormat('dd MMM yyyy').format(reportState.startDate!)} - ${DateFormat('dd MMM yyyy').format(reportState.endDate!)}'
+        : 'Period: ${reportState.filter.toString().split('.').last.toUpperCase()}';
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (pw.Context context) => [
+          pw.Header(
+            level: 0,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'CafePOS Sales Report',
+                      style: pw.TextStyle(
+                        fontSize: 24,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(
+                      dateRangeStr,
+                      style: const pw.TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text(
+                      'Generated on:',
+                      style: const pw.TextStyle(fontSize: 10),
+                    ),
+                    pw.Text(
+                      DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now()),
+                      style: const pw.TextStyle(fontSize: 10),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 20),
+
+          pw.Text(
+            'Financial Summary',
+            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 10),
+          pw.TableHelper.fromTextArray(
+            headers: ['Metric', 'Value'],
+            data: [
+              ['Total Revenue', 'INR ${totalRevenue.toStringAsFixed(2)}'],
+              ['Total Orders', '$totalOrders'],
+              ['Average Ticket Size', 'INR ${aov.toStringAsFixed(2)}'],
+              ['Cash Payments', 'INR ${cashTotal.toStringAsFixed(2)}'],
+              ['UPI Payments', 'INR ${upiTotal.toStringAsFixed(2)}'],
+              ['Card Payments', 'INR ${cardTotal.toStringAsFixed(2)}'],
+              ['Tax Collected', 'INR ${totalTax.toStringAsFixed(2)}'],
+              ['Discounts Given', 'INR ${totalDiscount.toStringAsFixed(2)}'],
+            ],
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            cellAlignment: pw.Alignment.centerLeft,
+          ),
+          pw.SizedBox(height: 24),
+
+          pw.Text(
+            'Category Sales Breakdown',
+            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 10),
+          pw.TableHelper.fromTextArray(
+            headers: ['Category / Section', 'Revenue (INR)', 'Share (%)'],
+            data: categorySales.isEmpty
+                ? [
+                    ['No data available', '0.00', '0%'],
+                  ]
+                : categorySales.entries.map((e) {
+                    final pct = totalRevenue > 0
+                        ? (e.value / totalRevenue) * 100
+                        : 0.0;
+                    return [
+                      e.key,
+                      e.value.toStringAsFixed(2),
+                      '${pct.toStringAsFixed(1)}%',
+                    ];
+                  }).toList(),
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 24),
+
+          pw.Text(
+            'Top Selling Items',
+            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 10),
+          pw.TableHelper.fromTextArray(
+            headers: ['Item Name', 'Quantity Sold'],
+            data: topItems.isEmpty
+                ? [
+                    ['No items sold', '0 pcs'],
+                  ]
+                : topItems
+                      .take(10)
+                      .map((e) => [e.key, '${e.value} pcs'])
+                      .toList(),
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          ),
+        ],
+      ),
+    );
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+        name:
+            'Sales_Report_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
+      );
+    } catch (e) {
+      messenger.showSnackBar(
+        SnackBar(content: Text('Failed to generate report PDF: $e')),
+      );
     }
   }
 }

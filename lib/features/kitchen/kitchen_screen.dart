@@ -357,8 +357,8 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
     final isMobile = size.width < 600;
 
     return Container(
-      height: isMobile ? 76 : 86,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      height: isMobile ? 66 : 74,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: ListView(
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
@@ -407,8 +407,8 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
     required bool isDark,
   }) {
     return Container(
-      width: 140,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      width: 120,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkCard : Colors.white,
         borderRadius: BorderRadius.circular(14),
@@ -427,14 +427,14 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(6),
+            padding: const EdgeInsets.all(5),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(6),
             ),
-            child: Icon(icon, color: color, size: 18),
+            child: Icon(icon, color: color, size: 14),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 6),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -443,7 +443,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
                 Text(
                   title,
                   style: GoogleFonts.inter(
-                    fontSize: 10,
+                    fontSize: 8.5,
                     fontWeight: FontWeight.w600,
                     color: isDark
                         ? AppColors.textWhiteMuted
@@ -455,7 +455,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
                 Text(
                   value,
                   style: GoogleFonts.inter(
-                    fontSize: 16,
+                    fontSize: 13,
                     fontWeight: FontWeight.w800,
                     color: isDark ? AppColors.textWhite : AppColors.textDark,
                   ),
@@ -506,11 +506,11 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
     ];
 
     return Container(
-      height: isMobile ? 40 : 48,
+      height: isMobile ? 32 : 38,
       color: Colors.transparent,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
         children: filters.map((f) {
           final key = f.$1;
           final label = f.$2;
@@ -526,8 +526,8 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
                 padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 12 : 16,
-                  vertical: isMobile ? 4 : 6,
+                  horizontal: isMobile ? 10 : 12,
+                  vertical: isMobile ? 3 : 4,
                 ),
                 decoration: BoxDecoration(
                   color: isSelected
@@ -549,18 +549,18 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
                   children: [
                     Icon(
                       icon,
-                      size: isMobile ? 13 : 15,
+                      size: isMobile ? 11 : 13,
                       color: isSelected
                           ? Colors.white
                           : (isDark
                                 ? AppColors.textWhiteMuted
                                 : AppColors.textDarkMuted),
                     ),
-                    const SizedBox(width: 6),
+                    const SizedBox(width: 5),
                     Text(
                       label,
                       style: GoogleFonts.inter(
-                        fontSize: isMobile ? 11 : 12,
+                        fontSize: isMobile ? 9.5 : 10.5,
                         fontWeight: FontWeight.w700,
                         color: isSelected
                             ? Colors.white
@@ -587,7 +587,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
                         child: Text(
                           '$count',
                           style: GoogleFonts.inter(
-                            fontSize: isMobile ? 9 : 10,
+                            fontSize: isMobile ? 8 : 9,
                             fontWeight: FontWeight.w800,
                             color: isSelected
                                 ? Colors.white
@@ -608,15 +608,27 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
 
   Widget _buildTabletGrid(List<KotMaster> kots, bool isDark) {
     final size = MediaQuery.of(context).size;
-    final crossAxisCount = size.width > 1050 ? 3 : 2;
+    final crossAxisCount = size.width > 1400
+        ? 5
+        : size.width > 1100
+        ? 4
+        : size.width > 800
+        ? 3
+        : 2;
 
     return GridView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(10),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: size.width > 1050 ? 0.90 : 0.84,
+        crossAxisSpacing: 10,
+        mainAxisSpacing: 10,
+        childAspectRatio: size.width > 1400
+            ? 0.98
+            : size.width > 1100
+            ? 0.94
+            : size.width > 800
+            ? 0.90
+            : 0.85,
       ),
       itemCount: kots.length,
       itemBuilder: (context, i) => _KotCard(
@@ -837,7 +849,7 @@ class _KotCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkCard : Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: _statusColor.withValues(alpha: isDark ? 0.25 : 0.2),
           width: urgent ? 1.5 : 1.0,
@@ -847,8 +859,8 @@ class _KotCard extends StatelessWidget {
             color: urgent
                 ? Colors.red.withValues(alpha: isDark ? 0.15 : 0.08)
                 : Colors.black.withValues(alpha: isDark ? 0.15 : 0.04),
-            blurRadius: isMobile ? 8 : 12,
-            offset: const Offset(0, 4),
+            blurRadius: isMobile ? 6 : 8,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -858,13 +870,13 @@ class _KotCard extends StatelessWidget {
           // Card header with linear gradient
           Container(
             padding: EdgeInsets.symmetric(
-              horizontal: isMobile ? 12 : 16,
-              vertical: isMobile ? 10 : 14,
+              horizontal: isMobile ? 10 : 12,
+              vertical: isMobile ? 8 : 10,
             ),
             decoration: BoxDecoration(
               gradient: _headerGradient,
               borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(19),
+                top: Radius.circular(13),
               ),
             ),
             child: Row(
@@ -876,7 +888,7 @@ class _KotCard extends StatelessWidget {
                       Text(
                         kot.kotNumber,
                         style: GoogleFonts.inter(
-                          fontSize: isMobile ? 13 : 15,
+                          fontSize: isMobile ? 12 : 13.5,
                           fontWeight: FontWeight.w900,
                           color: Colors.white,
                           letterSpacing: 0.2,
@@ -897,7 +909,7 @@ class _KotCard extends StatelessWidget {
                                   ? 'Table ${kot.tableName}'
                                   : 'Take Away / Delivery',
                               style: GoogleFonts.inter(
-                                fontSize: isMobile ? 11 : 12,
+                                fontSize: isMobile ? 10 : 11,
                                 fontWeight: FontWeight.w700,
                                 color: Colors.white,
                               ),
@@ -915,17 +927,17 @@ class _KotCard extends StatelessWidget {
                   children: [
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
+                        horizontal: 6,
+                        vertical: 2,
                       ),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         _statusLabel,
                         style: GoogleFonts.inter(
-                          fontSize: isMobile ? 8.5 : 9.5,
+                          fontSize: isMobile ? 8 : 9,
                           fontWeight: FontWeight.w900,
                           color: Colors.white,
                         ),
@@ -938,7 +950,7 @@ class _KotCard extends StatelessWidget {
                           const Icon(
                                 Icons.warning_amber_rounded,
                                 color: Colors.white,
-                                size: 13,
+                                size: 11,
                               )
                               .animate(
                                 onPlay: (controller) =>
@@ -954,14 +966,14 @@ class _KotCard extends StatelessWidget {
                         ],
                         Icon(
                           Icons.access_time_rounded,
-                          size: isMobile ? 11 : 13,
+                          size: isMobile ? 10 : 12,
                           color: urgent ? Colors.white : Colors.white70,
                         ),
                         const SizedBox(width: 3),
                         Text(
                           _elapsed(),
                           style: GoogleFonts.inter(
-                            fontSize: isMobile ? 10 : 11,
+                            fontSize: isMobile ? 9 : 10,
                             fontWeight: urgent
                                 ? FontWeight.w800
                                 : FontWeight.w500,
@@ -993,8 +1005,8 @@ class _KotCard extends StatelessWidget {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               padding: EdgeInsets.symmetric(
-                horizontal: isMobile ? 10 : 14,
-                vertical: isMobile ? 6 : 10,
+                horizontal: isMobile ? 8 : 10,
+                vertical: isMobile ? 4 : 6,
               ),
               itemCount: kot.items.length,
               itemBuilder: (context, idx) =>
@@ -1004,8 +1016,8 @@ class _KotCard extends StatelessWidget {
             Expanded(
               child: ListView.builder(
                 padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 10 : 14,
-                  vertical: isMobile ? 6 : 10,
+                  horizontal: isMobile ? 8 : 10,
+                  vertical: isMobile ? 4 : 6,
                 ),
                 itemCount: kot.items.length,
                 itemBuilder: (context, idx) =>
@@ -1022,16 +1034,16 @@ class _KotCard extends StatelessWidget {
                   : AppColors.lightBorder.withValues(alpha: 0.2),
             ),
             Padding(
-              padding: EdgeInsets.all(isMobile ? 10 : 14),
+              padding: EdgeInsets.all(isMobile ? 8 : 10),
               child: SizedBox(
                 width: double.infinity,
-                height: isMobile ? 36 : 42,
+                height: isMobile ? 30 : 36,
                 child: ElevatedButton.icon(
                   icon: Icon(
                     kot.status == KotStatus.pending
                         ? Icons.play_arrow_rounded
                         : Icons.done_all_rounded,
-                    size: isMobile ? 16 : 18,
+                    size: isMobile ? 14 : 16,
                   ),
                   onPressed: () => onStatusChange(kot, _nextStatus!),
                   style: ElevatedButton.styleFrom(
@@ -1039,11 +1051,11 @@ class _KotCard extends StatelessWidget {
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(isMobile ? 10 : 12),
+                      borderRadius: BorderRadius.circular(isMobile ? 8 : 10),
                     ),
                     padding: EdgeInsets.zero,
                     textStyle: GoogleFonts.inter(
-                      fontSize: isMobile ? 12 : 13,
+                      fontSize: isMobile ? 11 : 12,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.2,
                     ),
@@ -1074,8 +1086,8 @@ class _KotCard extends StatelessWidget {
 
     return Padding(
       padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 12 : 16,
-        vertical: 8,
+        horizontal: isMobile ? 10 : 12,
+        vertical: 5,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1087,7 +1099,7 @@ class _KotCard extends StatelessWidget {
                 child: Text(
                   'Preparation Progress',
                   style: GoogleFonts.inter(
-                    fontSize: isMobile ? 10 : 11,
+                    fontSize: isMobile ? 9 : 10,
                     fontWeight: FontWeight.w600,
                     color: isDark
                         ? AppColors.textWhiteMuted
@@ -1101,7 +1113,7 @@ class _KotCard extends StatelessWidget {
               Text(
                 '$doneLines/$totalLines Items Ready',
                 style: GoogleFonts.inter(
-                  fontSize: isMobile ? 10 : 11,
+                  fontSize: isMobile ? 9 : 10,
                   fontWeight: FontWeight.w800,
                   color: progress == 1.0
                       ? AppColors.success
@@ -1131,7 +1143,7 @@ class _KotCard extends StatelessWidget {
 
   Widget _buildItemRow(BuildContext context, KotItem item, bool isMobile) {
     return Padding(
-      padding: EdgeInsets.symmetric(vertical: isMobile ? 4.0 : 6.0),
+      padding: EdgeInsets.symmetric(vertical: isMobile ? 2.5 : 3.5),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1139,8 +1151,8 @@ class _KotCard extends StatelessWidget {
             children: [
               // Visual Abbreviation Badge
               Container(
-                width: isMobile ? 30 : 34,
-                height: isMobile ? 30 : 34,
+                width: isMobile ? 24 : 28,
+                height: isMobile ? 24 : 28,
                 decoration: BoxDecoration(
                   color: _getAvatarColor(
                     item.itemNameSnapshot,
@@ -1157,13 +1169,13 @@ class _KotCard extends StatelessWidget {
                 child: Text(
                   _getInitials(item.itemNameSnapshot),
                   style: GoogleFonts.inter(
-                    fontSize: isMobile ? 10 : 11,
+                    fontSize: isMobile ? 8.5 : 9.5,
                     fontWeight: FontWeight.w800,
                     color: _getAvatarColor(item.itemNameSnapshot),
                   ),
                 ),
               ),
-              SizedBox(width: isMobile ? 8 : 10),
+              SizedBox(width: isMobile ? 6 : 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1171,7 +1183,7 @@ class _KotCard extends StatelessWidget {
                     Text(
                       item.itemNameSnapshot,
                       style: GoogleFonts.inter(
-                        fontSize: isMobile ? 12 : 13.5,
+                        fontSize: isMobile ? 11 : 12,
                         fontWeight: FontWeight.w700,
                         color: isDark
                             ? AppColors.textWhite
@@ -1186,15 +1198,15 @@ class _KotCard extends StatelessWidget {
               // Quantity pill badge
               Container(
                 padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 6 : 8,
-                  vertical: isMobile ? 2.5 : 4,
+                  horizontal: isMobile ? 5 : 6,
+                  vertical: isMobile ? 2 : 3,
                 ),
-                margin: EdgeInsets.only(right: isMobile ? 6 : 8),
+                margin: EdgeInsets.only(right: isMobile ? 4 : 6),
                 decoration: BoxDecoration(
                   color: isDark
                       ? Colors.white.withValues(alpha: 0.08)
                       : Colors.black.withValues(alpha: 0.04),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(6),
                   border: Border.all(
                     color: isDark
                         ? Colors.white.withValues(alpha: 0.12)
@@ -1205,7 +1217,7 @@ class _KotCard extends StatelessWidget {
                 child: Text(
                   '${item.qty}x',
                   style: GoogleFonts.inter(
-                    fontSize: isMobile ? 11 : 12,
+                    fontSize: isMobile ? 10 : 11,
                     fontWeight: FontWeight.w900,
                     color: isDark ? AppColors.textWhite : AppColors.textDark,
                   ),
@@ -1221,12 +1233,12 @@ class _KotCard extends StatelessWidget {
           // Chef special notes highlighted
           if (item.notes != null && item.notes!.isNotEmpty) ...[
             Padding(
-              padding: EdgeInsets.only(left: isMobile ? 38 : 44, top: 4),
+              padding: EdgeInsets.only(left: isMobile ? 30 : 36, top: 3),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                 decoration: BoxDecoration(
                   color: Colors.orange.withValues(alpha: isDark ? 0.12 : 0.08),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(6),
                   border: Border.all(
                     color: Colors.orange.withValues(alpha: isDark ? 0.3 : 0.25),
                     width: 0.8,
@@ -1238,14 +1250,14 @@ class _KotCard extends StatelessWidget {
                     const Icon(
                       Icons.feedback_rounded,
                       color: Colors.orange,
-                      size: 11,
+                      size: 10,
                     ),
                     const SizedBox(width: 4),
                     Flexible(
                       child: Text(
                         item.notes!,
                         style: GoogleFonts.inter(
-                          fontSize: isMobile ? 9.5 : 10.5,
+                          fontSize: isMobile ? 9 : 10,
                           color: isDark
                               ? Colors.orange.shade300
                               : Colors.orange.shade900,
@@ -1290,14 +1302,14 @@ class _KotCard extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 200),
       padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 8 : 10,
-        vertical: isMobile ? 4 : 6,
+        horizontal: isMobile ? 6 : 8,
+        vertical: isMobile ? 3 : 4,
       ),
       decoration: BoxDecoration(
         color: status == KotItemStatus.done
             ? color
             : color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: status == KotItemStatus.done
               ? Colors.transparent
@@ -1311,25 +1323,25 @@ class _KotCard extends StatelessWidget {
           if (statusIcon != null) ...[
             if (isCooking)
               const SizedBox(
-                width: 10,
-                height: 10,
+                width: 8,
+                height: 8,
                 child: CircularProgressIndicator(
-                  strokeWidth: 1.5,
+                  strokeWidth: 1.2,
                   color: Colors.blue,
                 ),
               )
             else
               Icon(
                 statusIcon,
-                size: isMobile ? 11 : 13,
+                size: isMobile ? 9 : 11,
                 color: status == KotItemStatus.done ? Colors.white : color,
               ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 3),
           ],
           Text(
             label,
             style: GoogleFonts.inter(
-              fontSize: isMobile ? 8.5 : 9.5,
+              fontSize: isMobile ? 8 : 9,
               fontWeight: FontWeight.w800,
               color: status == KotItemStatus.done ? Colors.white : color,
             ),

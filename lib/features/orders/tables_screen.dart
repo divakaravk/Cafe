@@ -39,6 +39,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   // Active-order checkout state
   String _checkoutPaymentMode = 'CASH';
   double _checkoutDiscount = 0;
+  bool _isAddingMoreItems = false;
 
   @override
   void initState() {
@@ -330,7 +331,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     final cart = ref.watch(cartProvider(_selectedTable?.id));
 
     // Occupied table with no pending cart items → show active-order checkout
-    if (cart.isEmpty && (_selectedTable?.isOccupied ?? false)) {
+    if (cart.isEmpty && (_selectedTable?.isOccupied ?? false) && !_isAddingMoreItems) {
       return _buildActiveOrderCheckoutPanel(size, isDark, user);
     }
 
@@ -1392,7 +1393,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   ) {
     final bool isMobile = size.width < 600;
     final double panelWidth = isMobile ? size.width : min(360.0, size.width * 0.44);
-    final double panelHeight = isMobile ? size.height * 0.65 : size.height;
+    final double panelHeight = isMobile ? size.height * 0.75 : size.height;
 
     return Positioned(
       right: 0,
@@ -1471,6 +1472,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                       _selectedTable = null;
                       _checkoutDiscount = 0;
                       _checkoutPaymentMode = 'CASH';
+                      _isAddingMoreItems = false;
                     }),
                     style: IconButton.styleFrom(
                       backgroundColor: isDark
@@ -1482,10 +1484,10 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
               ),
             ),
             const Divider(height: 1),
-            // Bill details loaded from DB
+            // Order details loaded from DB
             Expanded(
               child: FutureBuilder<Map<String, dynamic>?>(
-                future: SupabaseService.getOpenBillForTable(_selectedTable!.id),
+                future: SupabaseService.getOrderSummaryForTable(_selectedTable!.id),
                 builder: (context, snap) {
                   if (snap.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -1501,161 +1503,255 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                     );
                   }
                   final bill = snap.data!;
+                  final orderedItems = (bill['ordered_items'] as List<dynamic>?) ?? [];
                   final subtotal = (bill['subtotal'] as num?)?.toDouble() ?? 0.0;
                   final cgst = (bill['cgst_amount'] as num?)?.toDouble() ?? 0.0;
                   final sgst = (bill['sgst_amount'] as num?)?.toDouble() ?? 0.0;
                   final rawTotal = subtotal + cgst + sgst;
-                  final discountAmt = rawTotal * (_checkoutDiscount / 100);
-                  final finalTotal = rawTotal - discountAmt;
 
                   return StatefulBuilder(
-                    builder: (ctx, setLocal) => SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Summary rows
-                          _summaryRow2('Subtotal', subtotal, isDark),
-                          if (cgst > 0) _summaryRow2('CGST', cgst, isDark),
-                          if (sgst > 0) _summaryRow2('SGST', sgst, isDark),
-                          const Divider(height: 24),
-
-                          // Discount field
-                          Text(
-                            'Discount %',
-                            style: GoogleFonts.inter(
-                              fontSize: 12, fontWeight: FontWeight.w600,
-                              color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          SizedBox(
-                            height: 40,
-                            child: TextField(
-                              keyboardType: TextInputType.number,
-                              style: GoogleFonts.inter(fontSize: 14),
-                              decoration: InputDecoration(
-                                hintText: '0',
-                                filled: true,
-                                fillColor: isDark
-                                    ? Colors.white.withValues(alpha: 0.06)
-                                    : Colors.black.withValues(alpha: 0.04),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                  borderSide: BorderSide.none,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                                suffixText: '%',
+                    builder: (ctx, setLocal) {
+                      final discountAmt = rawTotal * (_checkoutDiscount / 100);
+                      final finalTotal = rawTotal - discountAmt;
+                      return SingleChildScrollView(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // ── Ordered items list ───────────────────
+                            Text(
+                              'Items Ordered',
+                              style: GoogleFonts.inter(
+                                fontSize: 12, fontWeight: FontWeight.w700,
+                                color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                                letterSpacing: 0.5,
                               ),
-                              onChanged: (v) {
-                                final d = double.tryParse(v) ?? 0;
-                                setState(() => _checkoutDiscount = d.clamp(0, 100));
-                                setLocal(() {});
-                              },
                             ),
-                          ),
-                          if (_checkoutDiscount > 0)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 6),
-                              child: _summaryRow2('Discount', -discountAmt, isDark, isNeg: true),
-                            ),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Total',
-                                style: GoogleFonts.inter(
-                                  fontSize: 16, fontWeight: FontWeight.w800,
+                            const SizedBox(height: 8),
+                            if (orderedItems.isEmpty)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                child: Text(
+                                  'No items recorded',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                                  ),
                                 ),
-                              ),
-                              Text(
-                                '₹${finalTotal.toStringAsFixed(0)}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 20, fontWeight: FontWeight.w900,
-                                  color: isDark ? AppColors.primaryAmber : AppColors.primaryOrange,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          // Payment mode
-                          Text(
-                            'Payment Mode',
-                            style: GoogleFonts.inter(
-                              fontSize: 12, fontWeight: FontWeight.w600,
-                              color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: ['CASH', 'UPI', 'CARD'].map((mode) {
-                              final sel = _checkoutPaymentMode == mode;
-                              return Expanded(
-                                child: Padding(
-                                  padding: const EdgeInsets.only(right: 6),
-                                  child: GestureDetector(
-                                    onTap: () => setState(() => _checkoutPaymentMode = mode),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(vertical: 10),
-                                      decoration: BoxDecoration(
-                                        color: sel
-                                            ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                                                .withValues(alpha: 0.15)
-                                            : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(
-                                          color: sel
-                                              ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                                              : Colors.grey.withValues(alpha: 0.3),
-                                          width: sel ? 1.5 : 1,
+                              )
+                            else
+                              ...orderedItems.map((raw) {
+                                final it = raw as Map<String, dynamic>;
+                                final name = it['item_name_snapshot'] as String? ?? '—';
+                                final qty = (it['qty'] as num?)?.toDouble() ?? 1.0;
+                                final rate = (it['rate_snapshot'] as num?)?.toDouble() ?? 0.0;
+                                final lineTotal = qty * rate;
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 4),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          name,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 13, fontWeight: FontWeight.w600,
+                                          ),
                                         ),
                                       ),
-                                      child: Text(
-                                        mode,
-                                        textAlign: TextAlign.center,
+                                      Text(
+                                        '×${qty.toInt()}',
                                         style: GoogleFonts.inter(
-                                          fontSize: 11, fontWeight: FontWeight.w700,
+                                          fontSize: 12, fontWeight: FontWeight.w500,
+                                          color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Text(
+                                        '₹${lineTotal.toStringAsFixed(0)}',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 13, fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            const Divider(height: 20),
+
+                            // ── Bill summary ─────────────────────────
+                            _summaryRow2('Subtotal', subtotal, isDark),
+                            if (cgst > 0) _summaryRow2('CGST', cgst, isDark),
+                            if (sgst > 0) _summaryRow2('SGST', sgst, isDark),
+                            const Divider(height: 20),
+
+                            // Discount field
+                            Text(
+                              'Discount %',
+                              style: GoogleFonts.inter(
+                                fontSize: 12, fontWeight: FontWeight.w600,
+                                color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            SizedBox(
+                              height: 40,
+                              child: TextField(
+                                keyboardType: TextInputType.number,
+                                style: GoogleFonts.inter(fontSize: 14),
+                                decoration: InputDecoration(
+                                  hintText: '0',
+                                  filled: true,
+                                  fillColor: isDark
+                                      ? Colors.white.withValues(alpha: 0.06)
+                                      : Colors.black.withValues(alpha: 0.04),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(10),
+                                    borderSide: BorderSide.none,
+                                  ),
+                                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                                  suffixText: '%',
+                                ),
+                                onChanged: (v) {
+                                  final d = double.tryParse(v) ?? 0;
+                                  setState(() => _checkoutDiscount = d.clamp(0, 100));
+                                  setLocal(() {});
+                                },
+                              ),
+                            ),
+                            if (_checkoutDiscount > 0)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 6),
+                                child: _summaryRow2('Discount', -discountAmt, isDark, isNeg: true),
+                              ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Total',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 16, fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                Text(
+                                  '₹${finalTotal.toStringAsFixed(0)}',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 20, fontWeight: FontWeight.w900,
+                                    color: isDark ? AppColors.primaryAmber : AppColors.primaryOrange,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 20),
+
+                            // ── Payment mode ─────────────────────────
+                            Text(
+                              'Payment Mode',
+                              style: GoogleFonts.inter(
+                                fontSize: 12, fontWeight: FontWeight.w600,
+                                color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: ['CASH', 'UPI', 'CARD'].map((mode) {
+                                final sel = _checkoutPaymentMode == mode;
+                                return Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 6),
+                                    child: GestureDetector(
+                                      onTap: () => setState(() => _checkoutPaymentMode = mode),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(vertical: 10),
+                                        decoration: BoxDecoration(
                                           color: sel
                                               ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                                              : (isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted),
+                                                  .withValues(alpha: 0.15)
+                                              : Colors.transparent,
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(
+                                            color: sel
+                                                ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                                                : Colors.grey.withValues(alpha: 0.3),
+                                            width: sel ? 1.5 : 1,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          mode,
+                                          textAlign: TextAlign.center,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 11, fontWeight: FontWeight.w700,
+                                            color: sel
+                                                ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                                                : (isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted),
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                          const SizedBox(height: 20),
-                          // Checkout button
-                          SafeArea(
-                            top: false,
-                            child: SizedBox(
+                                );
+                              }).toList(),
+                            ),
+                            const SizedBox(height: 16),
+
+                            // ── Add more items button ─────────────────
+                            SizedBox(
                               width: double.infinity,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.success,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
+                              child: OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(
+                                    color: isDark ? AppColors.primaryAmber : AppColors.primaryOrange,
                                   ),
-                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(vertical: 10),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
                                 ),
-                                onPressed: () => _doCheckout(finalTotal),
-                                child: Text(
-                                  'COMPLETE PAYMENT',
+                                onPressed: () => setState(() => _isAddingMoreItems = true),
+                                icon: Icon(
+                                  Icons.add_rounded, size: 16,
+                                  color: isDark ? AppColors.primaryAmber : AppColors.primaryOrange,
+                                ),
+                                label: Text(
+                                  'Add More Items',
                                   style: GoogleFonts.inter(
-                                    fontSize: 13, fontWeight: FontWeight.w800,
+                                    fontSize: 12, fontWeight: FontWeight.w700,
+                                    color: isDark ? AppColors.primaryAmber : AppColors.primaryOrange,
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
-                      ),
-                    ),
+                            const SizedBox(height: 10),
+
+                            // ── Checkout button ───────────────────────
+                            SafeArea(
+                              top: false,
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppColors.success,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 14),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    elevation: 0,
+                                  ),
+                                  onPressed: () => _doCheckout(finalTotal),
+                                  child: Text(
+                                    'COMPLETE PAYMENT',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 13, fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   );
                 },
               ),
@@ -1767,6 +1863,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
           _showCartTab = false;
           _searchQuery = '';
           _searchController.clear();
+          _isAddingMoreItems = false;
         });
       }
     } catch (e, st) {

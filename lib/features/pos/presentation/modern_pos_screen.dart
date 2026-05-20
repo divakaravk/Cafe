@@ -357,96 +357,165 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               ),
             ),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'CafePOS',
-                  style: GoogleFonts.inter(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                Text(
-                  '${user.fullName} • ${user.role}',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: isDark
-                        ? AppColors.textWhiteMuted
-                        : AppColors.textDarkMuted,
-                  ),
-                ),
-              ],
-            ),
-            const Spacer(),
-            // Theme switcher
-            IconButton(
-              icon: Icon(
-                ref.watch(isDarkModeProvider)
-                    ? Icons.light_mode_rounded
-                    : Icons.dark_mode_rounded,
-                size: 20,
-              ),
-              onPressed: () => ref.read(isDarkModeProvider.notifier).toggle(),
-            ),
-            const SizedBox(width: 8),
-            // Voice AI Toggle
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Voice',
-                  style: GoogleFonts.inter(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                Transform.scale(
-                  scale: 0.7,
-                  child: Switch(
-                    value: _isVoiceAIEnabled,
-                    activeColor: AppColors.primaryAmber,
-                    onChanged: (v) => setState(() => _isVoiceAIEnabled = v),
-                  ),
-                ),
-              ],
-            ),
-            // Item Groups Toggle (Hidden if company doesn't use variants)
-            if (ref
-                    .watch(companyProvider(user.companyId))
-                    .value
-                    ?.hasItemVariants ??
-                false) ...[
-              Row(
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Groups',
+                    'CafePOS',
                     style: GoogleFonts.inter(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  Transform.scale(
-                    scale: 0.7,
-                    child: Switch(
-                      value: _isGroupsOn,
-                      activeColor: AppColors.primaryAmber,
-                      onChanged: (v) => setState(() {
-                        _isGroupsOn = v;
-                        _selectedItem = null;
-                        _selectedSection =
-                            null; // Clear category filter when flipping mode
-                      }),
+                  Text(
+                    '${user.fullName} • ${user.role}',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: isDark
+                          ? AppColors.textWhiteMuted
+                          : AppColors.textDarkMuted,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
-            ],
+            ),
+            const Spacer(),
+            // Theme switcher
+            SizedBox(
+              width: 36,
+              height: 36,
+              child: IconButton(
+                padding: EdgeInsets.zero,
+                icon: Icon(
+                  ref.watch(isDarkModeProvider)
+                      ? Icons.light_mode_rounded
+                      : Icons.dark_mode_rounded,
+                  size: 20,
+                ),
+                onPressed: () =>
+                    ref.read(isDarkModeProvider.notifier).toggle(),
+              ),
+            ),
+            const SizedBox(width: 4),
+            // On narrow screens use a popup; on wide screens show toggles inline
+            Builder(
+              builder: (ctx) {
+                final screenW = MediaQuery.sizeOf(ctx).width;
+                final hasVariants = ref
+                        .watch(companyProvider(user.companyId))
+                        .value
+                        ?.hasItemVariants ??
+                    false;
+                // ≥ 480dp: show inline toggles
+                if (screenW >= 480) {
+                  return Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildCompactToggle(
+                        label: 'Voice',
+                        value: _isVoiceAIEnabled,
+                        onChanged: (v) =>
+                            setState(() => _isVoiceAIEnabled = v),
+                      ),
+                      if (hasVariants)
+                        _buildCompactToggle(
+                          label: 'Groups',
+                          value: _isGroupsOn,
+                          onChanged: (v) => setState(() {
+                            _isGroupsOn = v;
+                            _selectedItem = null;
+                            _selectedSection = null;
+                          }),
+                        ),
+                    ],
+                  );
+                }
+                // < 480dp: collapse into a single popup icon
+                return PopupMenuButton<String>(
+                  icon: const Icon(Icons.tune_rounded, size: 20),
+                  padding: EdgeInsets.zero,
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      enabled: false,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Voice AI',
+                              style: GoogleFonts.inter(fontSize: 13)),
+                          Switch(
+                            value: _isVoiceAIEnabled,
+                            activeColor: AppColors.primaryAmber,
+                            onChanged: (v) =>
+                                setState(() => _isVoiceAIEnabled = v),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (hasVariants)
+                      PopupMenuItem(
+                        enabled: false,
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 12),
+                        child: Row(
+                          mainAxisAlignment:
+                              MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Groups',
+                                style: GoogleFonts.inter(fontSize: 13)),
+                            Switch(
+                              value: _isGroupsOn,
+                              activeColor: AppColors.primaryAmber,
+                              onChanged: (v) => setState(() {
+                                _isGroupsOn = v;
+                                _selectedItem = null;
+                                _selectedSection = null;
+                              }),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                );
+              },
+            ),
           ],
         ),
       ),
     ).animate().fadeIn(duration: 300.ms);
+  }
+
+  // ─── COMPACT TOGGLE ─────────────────────────────────────
+  Widget _buildCompactToggle({
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w600),
+        ),
+        SizedBox(
+          width: 44,
+          height: 28,
+          child: FittedBox(
+            fit: BoxFit.fill,
+            child: Switch(
+              value: value,
+              activeColor: AppColors.primaryAmber,
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   // ─── SIDE TOGGLES ───────────────────────────────────────
@@ -639,6 +708,14 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     return _buildGroupGrid(masterItems, cart, cartNotifier, isDark, isTablet);
   }
 
+  // ─── Responsive grid column count ───────────────────────
+  int _gridCols(double w) {
+    if (w >= 900) return 7;
+    if (w >= 680) return 6;
+    if (w >= 480) return 5;
+    return 4;
+  }
+
   // ─── Phase 1: Parent Item Grid ──────────────────────────
   Widget _buildGroupGrid(
     List<Item> masterItems,
@@ -662,10 +739,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: isTablet ? 6 : 5,
+        crossAxisCount: _gridCols(MediaQuery.sizeOf(context).width),
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 0.8,
+        childAspectRatio: 0.85,
       ),
       itemCount: filteredMasters.length,
       itemBuilder: (context, index) {
@@ -708,10 +785,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: isTablet ? 6 : 5,
+        crossAxisCount: _gridCols(MediaQuery.sizeOf(context).width),
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 0.8,
+        childAspectRatio: 0.85,
       ),
       itemCount: variants.length,
       itemBuilder: (context, index) {
@@ -783,10 +860,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     return GridView.builder(
       padding: const EdgeInsets.all(16),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: isTablet ? 6 : 5,
+        crossAxisCount: _gridCols(MediaQuery.sizeOf(context).width),
         crossAxisSpacing: 8,
         mainAxisSpacing: 8,
-        childAspectRatio: 0.8,
+        childAspectRatio: 0.85,
       ),
       itemCount: filteredList.length,
       itemBuilder: (context, index) {

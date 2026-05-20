@@ -25,7 +25,6 @@ class MetricCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 170,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -303,15 +302,6 @@ class AnalysisChart extends StatelessWidget {
   Widget _buildWeekComparisonChart() {
     final isRevenue = metric == 'revenue';
     final currentTrends = isRevenue ? state.salesTrends : state.ordersTrends;
-    final prevPeriodBills = state.comparisonBills;
-
-    // Group previous bills by relative day (0-6)
-    final Map<int, double> prevTrends = {};
-    for (var bill in prevPeriodBills) {
-      if (bill.createdAt == null) continue;
-      // This is simplified: we'll just map them to day sequence
-      // In a real app, you'd align Monday with Monday.
-    }
 
     // For simplicity in this UI demo, we'll just compare totals or show a trend
     // Let's do a grouped bar Chart with 7 groups
@@ -509,11 +499,13 @@ class AnalysisChart extends StatelessWidget {
           reservedSize: 40,
           getTitlesWidget: (value, meta) {
             final index = value.toInt();
-            if (index < 0 || index >= sortedDates.length)
+            if (index < 0 || index >= sortedDates.length) {
               return const SizedBox();
+            }
             if (sortedDates.length > 10 &&
-                index % (sortedDates.length ~/ 5) != 0)
+                index % (sortedDates.length ~/ 5) != 0) {
               return const SizedBox();
+            }
             final date = sortedDates[index];
             final label = isHourly
                 ? DateFormat('ha').format(date)
@@ -534,7 +526,34 @@ class AnalysisChart extends StatelessWidget {
           },
         ),
       ),
-      leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+      leftTitles: AxisTitles(
+        sideTitles: SideTitles(
+          showTitles: true,
+          reservedSize: 40,
+          getTitlesWidget: (value, meta) {
+            if (value == meta.max || value == 0) return const SizedBox();
+            String label;
+            if (value >= 1000) {
+              label = '₹${(value / 1000).toStringAsFixed(0)}K';
+            } else {
+              label = '₹${value.toStringAsFixed(0)}';
+            }
+            return Padding(
+              padding: const EdgeInsets.only(right: 8.0),
+              child: Text(
+                label,
+                textAlign: TextAlign.end,
+                style: GoogleFonts.inter(
+                  fontSize: 9,
+                  color: isDark
+                      ? AppColors.textWhiteMuted
+                      : AppColors.textDarkMuted,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
       topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
     );
@@ -602,48 +621,114 @@ class PaymentSplitChart extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final total = cash + upi + card;
-    if (total == 0) return const Center(child: Text("No sales"));
+    if (total == 0) {
+      return Center(
+        child: Text(
+          "No sales data",
+          style: GoogleFonts.inter(
+            color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+          ),
+        ),
+      );
+    }
 
-    return PieChart(
-      PieChartData(
-        sectionsSpace: 4,
-        centerSpaceRadius: 40,
-        sections: [
-          PieChartSectionData(
-            color: AppColors.success,
-            value: cash,
-            title: cash > 0 ? 'Cash\n₹${cash.toStringAsFixed(0)}' : '',
-            radius: 40,
-            titleStyle: GoogleFonts.inter(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
+    final cashPct = (cash / total) * 100;
+    final upiPct = (upi / total) * 100;
+    final cardPct = (card / total) * 100;
+
+    return Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: PieChart(
+            PieChartData(
+              sectionsSpace: 2,
+              centerSpaceRadius: 25,
+              sections: [
+                if (cash > 0)
+                  PieChartSectionData(
+                    color: AppColors.success,
+                    value: cash,
+                    title: '',
+                    radius: 20,
+                  ),
+                if (upi > 0)
+                  PieChartSectionData(
+                    color: AppColors.info,
+                    value: upi,
+                    title: '',
+                    radius: 20,
+                  ),
+                if (card > 0)
+                  PieChartSectionData(
+                    color: AppColors.warning,
+                    value: card,
+                    title: '',
+                    radius: 20,
+                  ),
+              ],
             ),
           ),
-          PieChartSectionData(
-            color: AppColors.info,
-            value: upi,
-            title: upi > 0 ? 'UPI\n₹${upi.toStringAsFixed(0)}' : '',
-            radius: 40,
-            titleStyle: GoogleFonts.inter(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          flex: 6,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildLegendRow('Cash', cash, cashPct, AppColors.success),
+              const SizedBox(height: 10),
+              _buildLegendRow('UPI', upi, upiPct, AppColors.info),
+              const SizedBox(height: 10),
+              _buildLegendRow('Card', card, cardPct, AppColors.warning),
+            ],
           ),
-          PieChartSectionData(
-            color: AppColors.warning,
-            value: card,
-            title: card > 0 ? 'Card\n₹${card.toStringAsFixed(0)}' : '',
-            radius: 40,
-            titleStyle: GoogleFonts.inter(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLegendRow(
+    String label,
+    double amount,
+    double percentage,
+    Color color,
+  ) {
+    return Row(
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white70 : AppColors.textDark,
+                ),
+              ),
+              Text(
+                '₹${amount.toStringAsFixed(0)} (${percentage.toStringAsFixed(0)}%)',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: isDark
+                      ? AppColors.textWhiteMuted
+                      : AppColors.textDarkMuted,
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -673,37 +758,430 @@ class TableSalesChart extends StatelessWidget {
 
     final sortedEntries = tableSales.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    final displayEntries = sortedEntries.take(5).toList().reversed.toList();
+    final displayEntries = sortedEntries.take(5).toList();
 
-    final maxSales = displayEntries.isEmpty
-        ? 1.0
-        : displayEntries.map((e) => e.value).reduce((a, b) => a > b ? a : b);
+    final totalSales = tableSales.values.fold<double>(
+      0.0,
+      (sum, val) => sum + val,
+    );
+
+    return SingleChildScrollView(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: displayEntries.map((e) {
+          final amount = e.value;
+          final percentage = totalSales > 0 ? amount / totalSales : 0.0;
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6.0),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 70,
+                  child: Text(
+                    e.key,
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : AppColors.textDark,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Stack(
+                    alignment: Alignment.centerLeft,
+                    children: [
+                      Container(
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: isDark ? Colors.white10 : Colors.black12,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      FractionallySizedBox(
+                        widthFactor: percentage.clamp(0.0, 1.0),
+                        child: Container(
+                          height: 16,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: isDark
+                                  ? [
+                                      AppColors.primaryAmber,
+                                      AppColors.primaryAmber.withValues(
+                                        alpha: 0.6,
+                                      ),
+                                    ]
+                                  : [
+                                      AppColors.primaryOrange,
+                                      AppColors.primaryOrange.withValues(
+                                        alpha: 0.6,
+                                      ),
+                                    ],
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        left: 8,
+                        child: Text(
+                          '₹${amount.toStringAsFixed(0)}',
+                          style: GoogleFonts.inter(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.black : Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 40,
+                  child: Text(
+                    '${(percentage * 100).toStringAsFixed(0)}%',
+                    textAlign: TextAlign.end,
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: isDark
+                          ? AppColors.textWhiteMuted
+                          : AppColors.textDarkMuted,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class CategoryPieChart extends StatelessWidget {
+  final Map<String, double> categorySales;
+  final bool isDark;
+
+  const CategoryPieChart({
+    super.key,
+    required this.categorySales,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (categorySales.isEmpty) {
+      return Center(
+        child: Text(
+          "No category sales data",
+          style: GoogleFonts.inter(
+            color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+          ),
+        ),
+      );
+    }
+
+    final totalSales = categorySales.values.fold<double>(
+      0.0,
+      (sum, val) => sum + val,
+    );
+
+    final colors = [
+      AppColors.primaryAmber,
+      AppColors.accentTeal,
+      AppColors.info,
+      AppColors.success,
+      AppColors.warning,
+      AppColors.accentCoral,
+      Colors.purple,
+      Colors.indigo,
+    ];
+
+    final sortedEntries = categorySales.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: PieChart(
+            PieChartData(
+              sectionsSpace: 2,
+              centerSpaceRadius: 25,
+              sections: List.generate(sortedEntries.length, (i) {
+                final entry = sortedEntries[i];
+                final color = colors[i % colors.length];
+
+                return PieChartSectionData(
+                  color: color,
+                  value: entry.value,
+                  title: '',
+                  radius: 20,
+                );
+              }),
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          flex: 6,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: List.generate(sortedEntries.length, (i) {
+                final entry = sortedEntries[i];
+                final percentage = totalSales > 0 ? (entry.value / totalSales) * 100 : 0.0;
+                final color = colors[i % colors.length];
+
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          entry.key,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white70 : AppColors.textDark,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${percentage.toStringAsFixed(0)}%',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class TopSellingItemsList extends StatelessWidget {
+  final Map<String, int> itemQuantities;
+  final Map<String, double> itemRevenues;
+  final bool isDark;
+
+  const TopSellingItemsList({
+    super.key,
+    required this.itemQuantities,
+    required this.itemRevenues,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (itemQuantities.isEmpty) {
+      return Center(
+        child: Text(
+          "No items sold in this period",
+          style: GoogleFonts.inter(
+            color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+          ),
+        ),
+      );
+    }
+    final totalQty = itemQuantities.values.fold<int>(0, (sum, q) => sum + q);
+    final sortedEntries = itemQuantities.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final topEntries = sortedEntries.take(5).toList();
+
+    return Column(
+      children: topEntries.map((e) {
+        final qty = e.value;
+        final revenue = itemRevenues[e.key] ?? 0.0;
+        final percentage = totalQty > 0 ? qty / totalQty : 0.0;
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8.0),
+          child: Column(
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Text(
+                      e.key,
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : AppColors.textDark,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$qty pcs  (₹${revenue.toStringAsFixed(0)})',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: isDark
+                          ? AppColors.primaryAmber
+                          : AppColors.primaryOrange,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: percentage,
+                  backgroundColor: isDark ? Colors.white10 : Colors.black12,
+                  color: isDark
+                      ? AppColors.accentTeal
+                      : AppColors.primaryOrange,
+                  minHeight: 8,
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+}
+
+class HourlySalesChart extends StatelessWidget {
+  final Map<int, double> hourlySales;
+  final bool isDark;
+
+  const HourlySalesChart({
+    super.key,
+    required this.hourlySales,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (hourlySales.isEmpty) {
+      return Center(
+        child: Text(
+          "No hourly data available",
+          style: GoogleFonts.inter(
+            color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+          ),
+        ),
+      );
+    }
+
+    // Default or detected operating hours (e.g. 8 AM - 11 PM)
+    int startHour = 8;
+    int endHour = 23;
+    final keys = hourlySales.keys.toList()..sort();
+    if (keys.isNotEmpty) {
+      startHour = keys.first;
+      endHour = keys.last;
+      if (endHour - startHour < 4) {
+        startHour = 8;
+        endHour = 23;
+      }
+    }
+
+    final activeHours = List.generate(
+      endHour - startHour + 1,
+      (index) => startHour + index,
+    );
+
+    double maxSale = 0.0;
+    for (var hour in activeHours) {
+      final val = hourlySales[hour] ?? 0.0;
+      if (val > maxSale) maxSale = val;
+    }
+    maxSale = maxSale == 0 ? 100.0 : maxSale * 1.2;
 
     return BarChart(
       BarChartData(
         alignment: BarChartAlignment.spaceAround,
-        maxY: maxSales * 1.2,
+        maxY: maxSale,
         gridData: const FlGridData(show: false),
         borderData: FlBorderData(show: false),
         titlesData: FlTitlesData(
           show: true,
-          bottomTitles: const AxisTitles(
-            sideTitles: SideTitles(showTitles: false),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 30,
+              getTitlesWidget: (value, meta) {
+                final index = value.toInt();
+                if (index < 0 || index >= activeHours.length) {
+                  return const SizedBox();
+                }
+                final hour = activeHours[index];
+                final displayHour = hour == 0
+                    ? '12am'
+                    : hour == 12
+                    ? '12pm'
+                    : hour > 12
+                    ? '${hour - 12}pm'
+                    : '${hour}am';
+                if (activeHours.length > 10 && index % 2 != 0) {
+                  return const SizedBox();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(top: 6.0),
+                  child: Text(
+                    displayHour,
+                    style: GoogleFonts.inter(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? AppColors.textWhiteMuted
+                          : AppColors.textDarkMuted,
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              reservedSize: 60,
+              reservedSize: 40,
               getTitlesWidget: (value, meta) {
-                final index = value.toInt();
-                if (index < 0 || index >= displayEntries.length)
-                  return const SizedBox();
-                return Text(
-                  displayEntries[index].key,
-                  style: GoogleFonts.inter(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : AppColors.textDark,
+                if (value == meta.max || value == 0) return const SizedBox();
+                String label;
+                if (value >= 1000) {
+                  label = '₹${(value / 1000).toStringAsFixed(0)}K';
+                } else {
+                  label = '₹${value.toStringAsFixed(0)}';
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: Text(
+                    label,
+                    textAlign: TextAlign.end,
+                    style: GoogleFonts.inter(
+                      fontSize: 9,
+                      color: isDark
+                          ? AppColors.textWhiteMuted
+                          : AppColors.textDarkMuted,
+                    ),
                   ),
                 );
               },
@@ -716,16 +1194,18 @@ class TableSalesChart extends StatelessWidget {
             sideTitles: SideTitles(showTitles: false),
           ),
         ),
-        barGroups: List.generate(displayEntries.length, (i) {
+        barGroups: List.generate(activeHours.length, (i) {
+          final hour = activeHours[i];
+          final amount = hourlySales[hour] ?? 0.0;
           return BarChartGroupData(
             x: i,
             barRods: [
               BarChartRodData(
-                toY: displayEntries[i].value,
+                toY: amount,
                 color: isDark
                     ? AppColors.primaryAmber
                     : AppColors.primaryOrange,
-                width: 14,
+                width: activeHours.length > 12 ? 8 : 14,
                 borderRadius: const BorderRadius.vertical(
                   top: Radius.circular(4),
                 ),
@@ -733,6 +1213,62 @@ class TableSalesChart extends StatelessWidget {
             ],
           );
         }),
+      ),
+    );
+  }
+}
+
+class StatInsightCard extends StatelessWidget {
+  final String insightText;
+  final IconData icon;
+  final Color iconColor;
+  final bool isDark;
+
+  const StatInsightCard({
+    super.key,
+    required this.insightText,
+    required this.icon,
+    required this.iconColor,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkElevated.withOpacity(0.5) : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? AppColors.darkBorder.withOpacity(0.3)
+              : AppColors.lightBorder.withOpacity(0.5),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: iconColor.withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: iconColor, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              insightText,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: isDark
+                    ? AppColors.textWhiteMuted
+                    : AppColors.textDarkMuted,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

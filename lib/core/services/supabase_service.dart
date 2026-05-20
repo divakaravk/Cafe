@@ -536,6 +536,37 @@ class SupabaseService {
     return bill;
   }
 
+  /// Returns full order summary with ordered items list for the active-order checkout panel
+  static Future<Map<String, dynamic>?> getOrderSummaryForTable(String tableId) async {
+    final sessions = await client
+        .from('table_session')
+        .select('id')
+        .eq('table_id', tableId)
+        .eq('status', 'open')
+        .limit(1);
+    if ((sessions as List).isEmpty) return null;
+    final sessionId = sessions[0]['id'] as String;
+
+    final bills = await client
+        .from('bill_master')
+        .select('id, subtotal, total_amount, cgst_amount, sgst_amount')
+        .eq('table_session_id', sessionId)
+        .eq('status', 'open')
+        .limit(1);
+    if ((bills as List).isEmpty) {
+      return {'session_id': sessionId, 'ordered_items': <Map<String, dynamic>>[]};
+    }
+    final bill = Map<String, dynamic>.from(bills[0] as Map);
+    bill['session_id'] = sessionId;
+
+    final items = await client
+        .from('bill_item')
+        .select('item_name_snapshot, qty, rate_snapshot')
+        .eq('bill_id', bill['id'] as String);
+    bill['ordered_items'] = List<Map<String, dynamic>>.from(items as List);
+    return bill;
+  }
+
   /// Finalizes an open bill and closes the session (checkout)
   static Future<void> checkoutTable({
     required String tableId,
@@ -727,6 +758,10 @@ class SupabaseService {
   static Future<List<Map<String, dynamic>>> getActiveKots(
     String companyId,
   ) async {
+    // Show pending/in_progress always; include done KOTs from today only
+    final todayStart = DateTime.now().toUtc().copyWith(
+      hour: 0, minute: 0, second: 0, millisecond: 0, microsecond: 0,
+    );
     final res = await client
         .from('kot_master')
         .select(
@@ -734,7 +769,8 @@ class SupabaseService {
           'kot_item(*, bill_item(item_name_snapshot))',
         )
         .eq('company_id', companyId)
-        .not('status', 'in', '(done,cancelled)')
+        .neq('status', 'cancelled')
+        .gte('created_at', todayStart.toIso8601String())
         .order('created_at');
     return List<Map<String, dynamic>>.from(res);
   }

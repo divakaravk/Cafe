@@ -3,7 +3,8 @@
     "allow": [
       "WebSearch",
       "WebFetch(domain:medium.com)",
-      "WebFetch(domain:www.petpooja.com)"
+      "WebFetch(domain:www.petpooja.com)",
+      "Bash(flutter analyze *)"
     ]
   }
 }

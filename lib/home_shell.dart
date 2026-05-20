@@ -145,7 +145,9 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
           ),
           Expanded(
             child: ListView(
-              padding: EdgeInsets.zero,
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(context).padding.bottom + 20,
+              ),
               children: [
                 if (_isKitchen) ...[
                   _buildDrawerSection('KITCHEN', isDark),
@@ -223,9 +225,8 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                       () => Navigator.push(
                         context,
                         MaterialPageRoute(
-                          builder: (_) => KitchenScreen(
-                            companyId: widget.user.companyId,
-                          ),
+                          builder: (_) =>
+                              KitchenScreen(companyId: widget.user.companyId),
                         ),
                       ),
                       isDark,

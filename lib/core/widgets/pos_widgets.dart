@@ -38,7 +38,6 @@ class ItemGridTile extends StatelessWidget {
         splashColor: AppColors.primaryAmber.withValues(alpha: 0.2),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: isInCart
                 ? (isDark
@@ -55,90 +54,110 @@ class ItemGridTile extends StatelessWidget {
               width: isInCart ? 1.5 : 1,
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: typeColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  if (item.hasVariants && variantName == null)
-                    const Icon(
-                      Icons.layers_rounded,
-                      size: 12,
-                      color: AppColors.primaryAmber,
-                    ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Expanded(
-                child: Text(
-                  variantName != null
-                      ? '${item.itemName} ($variantName)'
-                      : item.itemName,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    height: 1.2,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (item.hasVariants && variantName == null)
-                        Text(
-                          'Starts from',
-                          style: GoogleFonts.inter(
-                            fontSize: 8,
-                            color: isDark
-                                ? AppColors.textWhiteMuted
-                                : AppColors.textDarkMuted,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final w = constraints.maxWidth;
+              final h = constraints.maxHeight;
+              final pad = (w * 0.1).clamp(6.0, 14.0);
+              final nameSz = (w * 0.115).clamp(9.0, 13.0);
+              final priceSz = (w * 0.135).clamp(10.0, 15.0);
+              final labelSz = (w * 0.075).clamp(7.0, 9.0);
+              final dotSz = (w * 0.075).clamp(6.0, 10.0);
+              final iconSz = (w * 0.115).clamp(10.0, 14.0);
+              final nameLines = h >= 100 ? 2 : 1;
+              return Padding(
+                padding: EdgeInsets.all(pad),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Container(
+                          width: dotSz,
+                          height: dotSz,
+                          decoration: BoxDecoration(
+                            color: typeColor,
+                            shape: BoxShape.circle,
                           ),
                         ),
-                      Text(
-                        '₹${item.rate.toStringAsFixed(0)}',
+                        if (item.hasVariants && variantName == null)
+                          Icon(
+                            Icons.layers_rounded,
+                            size: iconSz,
+                            color: AppColors.primaryAmber,
+                          ),
+                      ],
+                    ),
+                    SizedBox(height: pad * 0.5),
+                    Expanded(
+                      child: Text(
+                        variantName != null
+                            ? '${item.itemName} ($variantName)'
+                            : item.itemName,
                         style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: isDark
-                              ? AppColors.primaryAmber
-                              : AppColors.primaryOrange,
+                          fontSize: nameSz,
+                          fontWeight: FontWeight.w600,
+                          height: 1.2,
                         ),
-                      ),
-                    ],
-                  ),
-                  if (isInCart)
-                    Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? AppColors.primaryAmber
-                            : AppColors.primaryOrange,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.check,
-                        size: 10,
-                        color: Colors.white,
+                        maxLines: nameLines,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                ],
-              ),
-            ],
+                    SizedBox(height: pad * 0.3),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (item.hasVariants && variantName == null)
+                                Text(
+                                  'Starts from',
+                                  style: GoogleFonts.inter(
+                                    fontSize: labelSz,
+                                    color: isDark
+                                        ? AppColors.textWhiteMuted
+                                        : AppColors.textDarkMuted,
+                                  ),
+                                ),
+                              Text(
+                                '₹${item.rate.toStringAsFixed(0)}',
+                                style: GoogleFonts.inter(
+                                  fontSize: priceSz,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDark
+                                      ? AppColors.primaryAmber
+                                      : AppColors.primaryOrange,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (isInCart)
+                          Container(
+                            padding: EdgeInsets.all((w * 0.03).clamp(2.0, 4.0)),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? AppColors.primaryAmber
+                                  : AppColors.primaryOrange,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.check,
+                              size: (w * 0.09).clamp(8.0, 12.0),
+                              color: Colors.white,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -880,37 +899,63 @@ class SimpleVariantTile extends StatelessWidget {
               ),
             ),
 
-            // Info Area
+            // Info Area — sizes scale to whatever height the grid gives.
+            // Budget: contentHeight = h - 2*hPad = h*0.84
+            // 1-line: nameSz*1.15 + gap + priceSz  ≤ h*0.84
+            // 2-line: nameSz*1.15*2 + gap + priceSz ≤ h*0.84  →  nameSz≤h*0.20
             Expanded(
               flex: 2,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      name,
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        height: 1.1,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final h = constraints.maxHeight;
+                  final hPad = (h * 0.08).clamp(2.0, 6.0);
+                  // Only allow 2 lines when card is tall enough to fit them
+                  final nameLines = h >= 52 ? 2 : 1;
+                  final nameSz = nameLines == 2
+                      ? (h * 0.20).clamp(8.0, 11.0)
+                      : (h * 0.27).clamp(9.0, 13.0);
+                  final priceSz = (h * 0.28).clamp(10.0, 14.0);
+                  final gap = (h * 0.05).clamp(1.0, 3.0);
+                  return Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal:
+                          (constraints.maxWidth * 0.08).clamp(4.0, 10.0),
+                      vertical: hPad,
                     ),
-                    Text(
-                      '₹${price.toStringAsFixed(0)}',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: isDark
-                            ? AppColors.primaryAmber
-                            : AppColors.primaryOrange,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            name,
+                            style: GoogleFonts.inter(
+                              fontSize: nameSz,
+                              fontWeight: FontWeight.w700,
+                              height: 1.15,
+                            ),
+                            maxLines: nameLines,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          SizedBox(height: gap),
+                          Text(
+                            '₹${price.toStringAsFixed(0)}',
+                            style: GoogleFonts.inter(
+                              fontSize: priceSz,
+                              fontWeight: FontWeight.w800,
+                              color: isDark
+                                  ? AppColors.primaryAmber
+                                  : AppColors.primaryOrange,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
                       ),
                     ),
-                  ],
-                ),
+                  );
+                },
               ),
             ),
           ],
