@@ -96,10 +96,31 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
     super.dispose();
   }
 
+  // ─── Network ───────────────────────────────────────────────────────────────
+
+  Future<bool> _hasNetwork() async {
+    try {
+      final result = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(seconds: 5));
+      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _checkNetworkAndWarn() async {
+    if (!await _hasNetwork()) {
+      _showError('No internet connection. Check your network and retry.');
+      return false;
+    }
+    return true;
+  }
+
   // ─── Data ──────────────────────────────────────────────────────────────────
 
   Future<void> _loadUsers() async {
     if (_isLoading) return;
+    if (!await _checkNetworkAndWarn()) return;
     setState(() => _isLoading = true);
     try {
       final user = ref.read(authStateProvider).value;
@@ -113,7 +134,9 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
         );
       }
     } on TimeoutException {
-      _showError('Request timed out.', onRetry: _loadUsers);
+      _showError('Request timed out. Check your connection.', onRetry: _loadUsers);
+    } on SocketException {
+      _showError('Network error. Check your connection.', onRetry: _loadUsers);
     } catch (e) {
       _showError('Failed to load users: $e', onRetry: _loadUsers);
     } finally {
@@ -133,6 +156,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
 
   Future<void> _startEdit(UserProfile user) async {
     if (_isLoading) return;
+    if (!await _checkNetworkAndWarn()) return;
     setState(() => _isLoading = true);
     try {
       final permsData = await SupabaseService.getUserPermissions(
@@ -160,6 +184,8 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
       });
     } on TimeoutException {
       _showError('Request timed out.', onRetry: () => _startEdit(user));
+    } on SocketException {
+      _showError('Network error. Check your connection.', onRetry: () => _startEdit(user));
     } catch (e) {
       _showError('Failed to load user: $e', onRetry: () => _startEdit(user));
     } finally {
@@ -192,6 +218,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
   Future<void> _saveUser() async {
     if (_isLoading) return;
     if (!_formKey.currentState!.validate()) return;
+    if (!await _checkNetworkAndWarn()) return;
 
     setState(() => _isLoading = true);
     try {
@@ -247,10 +274,9 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
         _loadUsers();
       }
     } on TimeoutException {
-      _showError(
-        'Request timed out. Check your connection.',
-        onRetry: _saveUser,
-      );
+      _showError('Request timed out. Check your connection.', onRetry: _saveUser);
+    } on SocketException {
+      _showError('Network error. Check your connection.', onRetry: _saveUser);
     } catch (e) {
       _showError('Failed to save: $e', onRetry: _saveUser);
     } finally {
@@ -709,9 +735,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
             height: 40,
             padding: const EdgeInsets.all(3),
             decoration: BoxDecoration(
-              color: isDark
-                  ? AppColors.darkBg
-                  : Colors.white,
+              color: isDark ? AppColors.darkBg : Colors.white,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
@@ -769,7 +793,9 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
                 size: 14,
                 color: selected
                     ? rc
-                    : (isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted),
+                    : (isDark
+                          ? AppColors.textWhiteMuted
+                          : AppColors.textDarkMuted),
               ),
               const SizedBox(width: 6),
               Text(
@@ -780,8 +806,8 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
                   color: selected
                       ? rc
                       : (isDark
-                          ? AppColors.textWhiteMuted
-                          : AppColors.textDarkMuted),
+                            ? AppColors.textWhiteMuted
+                            : AppColors.textDarkMuted),
                 ),
               ),
             ],
@@ -802,305 +828,403 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
       child: ListView(
         padding: EdgeInsets.fromLTRB(0, 0, 0, 16 + mq.padding.bottom),
         children: [
-          // Colored profile header
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(16, 20, 16, 36),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: isDark
-                    ? [AppColors.darkSurface, AppColors.darkBg]
-                    : [rc.withValues(alpha: 0.12), const Color(0xFFF0F2F5)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-              ),
-            ),
-            child: Center(
-              child: Stack(
-                children: [
-                  Container(
-                    width: 90,
-                    height: 90,
+          // Decorative profile header with circles
+          SizedBox(
+            height: 200,
+            child: Stack(
+              clipBehavior: Clip.hardEdge,
+              children: [
+                // Background gradient fill
+                Positioned.fill(
+                  child: Container(
                     decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: rc, width: 2.5),
-                      boxShadow: [
-                        BoxShadow(
-                          color: rc.withValues(alpha: 0.3),
-                          blurRadius: 14,
-                          offset: const Offset(0, 5),
-                        ),
-                      ],
-                    ),
-                    child: ClipOval(
-                      child: _pickedImage != null
-                          ? Image.file(File(_pickedImage!.path), fit: BoxFit.cover)
-                          : _avatarUrl != null
-                              ? Image.network(_avatarUrl!, fit: BoxFit.cover)
-                              : Container(
-                                  color: rc.withValues(alpha: 0.1),
-                                  child: Icon(Icons.person_rounded, size: 44, color: rc),
-                                ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: GestureDetector(
-                      onTap: _pickImage,
-                      child: Container(
-                        padding: const EdgeInsets.all(7),
-                        decoration: BoxDecoration(
-                          color: rc,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: isDark ? AppColors.darkBg : Colors.white,
-                            width: 2,
-                          ),
-                        ),
-                        child: const Icon(Icons.camera_alt_rounded,
-                            size: 14, color: Colors.white),
+                      gradient: LinearGradient(
+                        colors: isDark
+                            ? [AppColors.darkSurface, AppColors.darkBg]
+                            : [rc.withValues(alpha: 0.18), rc.withValues(alpha: 0.03)],
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+                // Decorative circles — top right
+                Positioned(
+                  top: -55,
+                  right: -45,
+                  child: Container(
+                    width: 170,
+                    height: 170,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: rc.withValues(alpha: isDark ? 0.08 : 0.11),
+                    ),
+                  ),
+                ),
+                // Decorative circles — top left
+                Positioned(
+                  top: -35,
+                  left: -55,
+                  child: Container(
+                    width: 140,
+                    height: 140,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: rc.withValues(alpha: isDark ? 0.06 : 0.08),
+                    ),
+                  ),
+                ),
+                // Small dot — bottom right
+                Positioned(
+                  bottom: 24,
+                  right: 36,
+                  child: Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: rc.withValues(alpha: isDark ? 0.05 : 0.09),
+                    ),
+                  ),
+                ),
+                // Ring outline — bottom left
+                Positioned(
+                  bottom: -18,
+                  left: 24,
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: rc.withValues(alpha: isDark ? 0.1 : 0.14),
+                        width: 2,
+                      ),
+                    ),
+                  ),
+                ),
+                // Outer avatar halo ring
+                Center(
+                  child: Container(
+                    width: 114,
+                    height: 114,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: rc.withValues(alpha: 0.22),
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                ),
+                // Avatar + camera button
+                Center(
+                  child: Stack(
+                    children: [
+                      Container(
+                        width: 92,
+                        height: 92,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(color: rc, width: 2.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: rc.withValues(alpha: 0.35),
+                              blurRadius: 18,
+                              offset: const Offset(0, 6),
+                            ),
+                          ],
+                        ),
+                        child: ClipOval(
+                          child: _pickedImage != null
+                              ? Image.file(File(_pickedImage!.path), fit: BoxFit.cover)
+                              : _avatarUrl != null
+                                  ? Image.network(_avatarUrl!, fit: BoxFit.cover)
+                                  : Container(
+                                      color: rc.withValues(alpha: isDark ? 0.15 : 0.08),
+                                      child: Icon(Icons.person_rounded, size: 46, color: rc),
+                                    ),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: 0,
+                        right: 0,
+                        child: GestureDetector(
+                          onTap: _pickImage,
+                          child: Container(
+                            padding: const EdgeInsets.all(7),
+                            decoration: BoxDecoration(
+                              color: rc,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isDark ? AppColors.darkBg : Colors.white,
+                                width: 2.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: rc.withValues(alpha: 0.4),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ],
+                            ),
+                            child: const Icon(Icons.camera_alt_rounded,
+                                size: 14, color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
           Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-          child: Column(
-            children: [
-          const SizedBox(height: 16),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            child: Column(
+              children: [
+                const SizedBox(height: 16),
 
-          // Identity section
-          _EditorCard(
-            title: 'Identity',
-            icon: Icons.badge_rounded,
-            accentColor: AppColors.primaryAmber,
-            isDark: isDark,
-            children: [
-              _field(
-                controller: _nameController,
-                focusNode: _nameFocus,
-                nextFocus: _codeFocus,
-                label: 'Full Name',
-                icon: Icons.person_outline_rounded,
-                validator: (v) => v!.trim().isEmpty ? 'Required' : null,
-                isDark: isDark,
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: _field(
-                      controller: _codeController,
-                      focusNode: _codeFocus,
-                      nextFocus: _usernameFocus,
-                      label: 'Employee Code',
-                      icon: Icons.numbers_rounded,
+                // Identity section
+                _EditorCard(
+                  title: 'Identity',
+                  icon: Icons.badge_rounded,
+                  accentColor: AppColors.primaryAmber,
+                  isDark: isDark,
+                  children: [
+                    _field(
+                      controller: _nameController,
+                      focusNode: _nameFocus,
+                      nextFocus: _codeFocus,
+                      label: 'Full Name',
+                      icon: Icons.person_outline_rounded,
                       validator: (v) => v!.trim().isEmpty ? 'Required' : null,
                       isDark: isDark,
-                      formatters: [UpperCaseTextFormatter()],
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(child: _roleDropdown(isDark)),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          // Login credentials section
-          _EditorCard(
-            title: 'Login Credentials',
-            icon: Icons.lock_rounded,
-            accentColor: AppColors.info,
-            isDark: isDark,
-            children: [
-              _field(
-                controller: _usernameController,
-                focusNode: _usernameFocus,
-                nextFocus: _passwordFocus,
-                label: 'Username',
-                icon: Icons.alternate_email_rounded,
-                validator: (v) => v!.trim().isEmpty ? 'Required' : null,
-                isDark: isDark,
-                formatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9_.]')),
-                ],
-              ),
-              const SizedBox(height: 14),
-              _passwordField(isDark),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          // Contact section
-          _EditorCard(
-            title: 'Contact',
-            icon: Icons.contact_phone_rounded,
-            accentColor: AppColors.accentTeal,
-            isDark: isDark,
-            children: [
-              _field(
-                controller: _phoneController,
-                focusNode: _phoneFocus,
-                nextFocus: _emailFocus,
-                label: 'Phone Number',
-                icon: Icons.phone_outlined,
-                keyboardType: TextInputType.phone,
-                maxLength: 10,
-                formatters: [FilteringTextInputFormatter.digitsOnly],
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return null;
-                  if (v.trim().length != 10) return '10 digits required';
-                  return null;
-                },
-                isDark: isDark,
-              ),
-              const SizedBox(height: 14),
-              _field(
-                controller: _emailController,
-                focusNode: _emailFocus,
-                label: 'Email Address',
-                icon: Icons.email_outlined,
-                keyboardType: TextInputType.emailAddress,
-                validator: (v) =>
-                    v!.isNotEmpty && !v.contains('@') ? 'Invalid email' : null,
-                isDark: isDark,
-                textInputAction: TextInputAction.done,
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-
-          // Status section
-          _EditorCard(
-            title: 'Account Status',
-            icon: Icons.toggle_on_rounded,
-            accentColor: _isActive ? AppColors.success : AppColors.error,
-            isDark: isDark,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    const SizedBox(height: 14),
+                    Row(
                       children: [
-                        Text(
-                          'Active Member',
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: isDark
-                                ? AppColors.textWhite
-                                : AppColors.textDark,
+                        Expanded(
+                          child: _field(
+                            controller: _codeController,
+                            focusNode: _codeFocus,
+                            nextFocus: _usernameFocus,
+                            label: 'Employee Code',
+                            icon: Icons.numbers_rounded,
+                            validator: (v) =>
+                                v!.trim().isEmpty ? 'Required' : null,
+                            isDark: isDark,
+                            formatters: [UpperCaseTextFormatter()],
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Allow user to login and perform actions',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: isDark
-                                ? AppColors.textWhiteMuted
-                                : AppColors.textDarkMuted,
-                          ),
+                        const SizedBox(width: 12),
+                        Expanded(child: _roleDropdown(isDark)),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                // Login credentials section
+                _EditorCard(
+                  title: 'Login Credentials',
+                  icon: Icons.lock_rounded,
+                  accentColor: AppColors.info,
+                  isDark: isDark,
+                  children: [
+                    _field(
+                      controller: _usernameController,
+                      focusNode: _usernameFocus,
+                      nextFocus: _passwordFocus,
+                      label: 'Username',
+                      icon: Icons.alternate_email_rounded,
+                      validator: (v) => v!.trim().isEmpty ? 'Required' : null,
+                      isDark: isDark,
+                      formatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'[a-zA-Z0-9_.]'),
                         ),
                       ],
                     ),
-                  ),
-                  Switch(
-                    value: _isActive,
-                    onChanged: (v) => setState(() => _isActive = v),
-                    activeThumbColor: AppColors.success,
-                    activeTrackColor: AppColors.success.withValues(alpha: 0.35),
-                    inactiveThumbColor: AppColors.error,
-                    inactiveTrackColor: AppColors.error.withValues(alpha: 0.25),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-
-          // Save button
-          SafeArea(
-            top: false,
-            child: SizedBox(
-              height: 52,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _saveUser,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.transparent,
-                  shadowColor: Colors.transparent,
-                  padding: EdgeInsets.zero,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+                    const SizedBox(height: 14),
+                    _passwordField(isDark),
+                  ],
                 ),
-                child: Ink(
-                  decoration: BoxDecoration(
-                    gradient: _isLoading
-                        ? LinearGradient(
-                            colors: [
-                              AppColors.primaryOrange.withValues(alpha: 0.4),
-                              AppColors.primaryAmber.withValues(alpha: 0.4),
-                            ],
-                          )
-                        : const LinearGradient(
-                            colors: [
-                              AppColors.primaryOrange,
-                              AppColors.primaryAmber,
-                            ],
-                            begin: Alignment.centerLeft,
-                            end: Alignment.centerRight,
-                          ),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Container(
-                    alignment: Alignment.center,
-                    child: _isLoading
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(
-                              color: Colors.white,
-                              strokeWidth: 2.5,
-                            ),
-                          )
-                        : Row(
-                            mainAxisSize: MainAxisSize.min,
+                const SizedBox(height: 14),
+
+                // Contact section
+                _EditorCard(
+                  title: 'Contact',
+                  icon: Icons.contact_phone_rounded,
+                  accentColor: AppColors.accentTeal,
+                  isDark: isDark,
+                  children: [
+                    _field(
+                      controller: _phoneController,
+                      focusNode: _phoneFocus,
+                      nextFocus: _emailFocus,
+                      label: 'Phone Number',
+                      icon: Icons.phone_outlined,
+                      keyboardType: TextInputType.phone,
+                      maxLength: 10,
+                      formatters: [FilteringTextInputFormatter.digitsOnly],
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return null;
+                        if (v.trim().length != 10) return '10 digits required';
+                        return null;
+                      },
+                      isDark: isDark,
+                    ),
+                    const SizedBox(height: 14),
+                    _field(
+                      controller: _emailController,
+                      focusNode: _emailFocus,
+                      label: 'Email Address',
+                      icon: Icons.email_outlined,
+                      keyboardType: TextInputType.emailAddress,
+                      validator: (v) => v!.isNotEmpty && !v.contains('@')
+                          ? 'Invalid email'
+                          : null,
+                      isDark: isDark,
+                      textInputAction: TextInputAction.done,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                // Status section
+                _EditorCard(
+                  title: 'Account Status',
+                  icon: Icons.toggle_on_rounded,
+                  accentColor: _isActive ? AppColors.success : AppColors.error,
+                  isDark: isDark,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Icon(
-                                Icons.check_circle_rounded,
-                                size: 18,
-                                color: Colors.white,
-                              ),
-                              const SizedBox(width: 8),
                               Text(
-                                _selectedUser == null
-                                    ? 'CREATE USER'
-                                    : 'SAVE CHANGES',
+                                'Active Member',
                                 style: GoogleFonts.inter(
-                                  fontWeight: FontWeight.w800,
                                   fontSize: 14,
-                                  letterSpacing: 1,
-                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? AppColors.textWhite
+                                      : AppColors.textDark,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Allow user to login and perform actions',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: isDark
+                                      ? AppColors.textWhiteMuted
+                                      : AppColors.textDarkMuted,
                                 ),
                               ),
                             ],
                           ),
+                        ),
+                        Switch(
+                          value: _isActive,
+                          onChanged: (v) => setState(() => _isActive = v),
+                          activeThumbColor: AppColors.success,
+                          activeTrackColor: AppColors.success.withValues(
+                            alpha: 0.35,
+                          ),
+                          inactiveThumbColor: AppColors.error,
+                          inactiveTrackColor: AppColors.error.withValues(
+                            alpha: 0.25,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+
+                // Save button
+                SafeArea(
+                  top: false,
+                  child: SizedBox(
+                    height: 52,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _saveUser,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        shadowColor: Colors.transparent,
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                      child: Ink(
+                        decoration: BoxDecoration(
+                          gradient: _isLoading
+                              ? LinearGradient(
+                                  colors: [
+                                    AppColors.primaryOrange.withValues(
+                                      alpha: 0.4,
+                                    ),
+                                    AppColors.primaryAmber.withValues(
+                                      alpha: 0.4,
+                                    ),
+                                  ],
+                                )
+                              : const LinearGradient(
+                                  colors: [
+                                    AppColors.primaryOrange,
+                                    AppColors.primaryAmber,
+                                  ],
+                                  begin: Alignment.centerLeft,
+                                  end: Alignment.centerRight,
+                                ),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Container(
+                          alignment: Alignment.center,
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 2.5,
+                                  ),
+                                )
+                              : Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(
+                                      Icons.check_circle_rounded,
+                                      size: 18,
+                                      color: Colors.white,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      _selectedUser == null
+                                          ? 'CREATE USER'
+                                          : 'SAVE CHANGES',
+                                      style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: 14,
+                                        letterSpacing: 1,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
-              ),
+              ],
             ),
-          ),
-          ],
-        ),
-      ),  // closes Padding
+          ), // closes Padding
         ],
       ),
     );
@@ -1177,12 +1301,15 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
                 children: [
                   Icon(_roleIcon(r), size: 14, color: _roleColor(r)),
                   const SizedBox(width: 6),
-                  Text(
-                    r.toUpperCase(),
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: _roleColor(r),
+                  Expanded(
+                    child: Text(
+                      r.toUpperCase(),
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: _roleColor(r),
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
