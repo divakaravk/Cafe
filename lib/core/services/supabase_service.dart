@@ -250,20 +250,42 @@ class SupabaseService {
         .eq('company_id', companyId)
         .order('table_number');
 
-    // Fetch tables that have an open session to determine occupancy
+    // Fetch open sessions to determine occupancy and map tableId -> sessionId
     final openSessions = await client
         .from('table_session')
-        .select('table_id')
+        .select('table_id, id')
         .eq('company_id', companyId)
         .eq('status', 'open');
 
-    final occupiedIds = {
-      for (final s in openSessions as List) s['table_id'] as String,
-    };
+    final sessionMap = <String, String>{};
+    for (final s in openSessions as List) {
+      sessionMap[s['table_id'] as String] = s['id'] as String;
+    }
+
+    // Fetch open bill totals for all occupied sessions in one query
+    final Map<String, double> sessionTotals = {};
+    if (sessionMap.isNotEmpty) {
+      final bills = await client
+          .from('bill_master')
+          .select('table_session_id, total_amount, subtotal, cgst_amount, sgst_amount')
+          .inFilter('table_session_id', sessionMap.values.toList())
+          .eq('status', 'open');
+      for (final bill in bills as List) {
+        final sid = bill['table_session_id'] as String;
+        final total = (bill['total_amount'] as num?)?.toDouble() ??
+            ((bill['subtotal'] as num?)?.toDouble() ?? 0.0) +
+                ((bill['cgst_amount'] as num?)?.toDouble() ?? 0.0) +
+                ((bill['sgst_amount'] as num?)?.toDouble() ?? 0.0);
+        sessionTotals[sid] = total;
+      }
+    }
 
     return (tables as List).map((t) {
       final map = Map<String, dynamic>.from(t as Map);
-      map['is_occupied'] = occupiedIds.contains(map['id']);
+      final tableId = map['id'] as String;
+      final sessionId = sessionMap[tableId];
+      map['is_occupied'] = sessionId != null;
+      map['active_order_total'] = sessionId != null ? (sessionTotals[sessionId] ?? 0.0) : 0.0;
       return map;
     }).toList();
   }

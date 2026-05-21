@@ -396,6 +396,7 @@ class CafeTable {
   final int seatingCapacity;
   final bool isActive;
   final bool isOccupied;
+  final double activeOrderTotal;
 
   CafeTable({
     required this.id,
@@ -405,6 +406,7 @@ class CafeTable {
     this.seatingCapacity = 2,
     this.isActive = true,
     this.isOccupied = false,
+    this.activeOrderTotal = 0.0,
   });
 
   String get tableName => tableNumber;
@@ -419,6 +421,7 @@ class CafeTable {
     seatingCapacity: json['seating_capacity'] as int? ?? 2,
     isActive: json['is_active'] as bool? ?? true,
     isOccupied: json['is_occupied'] as bool? ?? false,
+    activeOrderTotal: (json['active_order_total'] as num?)?.toDouble() ?? 0.0,
   );
 }
 
