@@ -362,13 +362,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    'CafePOS',
-                    style: GoogleFonts.inter(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                    ),
-                    overflow: TextOverflow.ellipsis,
+                  Image.asset(
+                    'assets/rasabhojan.png',
+                    height: 28,
+                    fit: BoxFit.contain,
                   ),
                   Text(
                     '${user.fullName} • ${user.role}',

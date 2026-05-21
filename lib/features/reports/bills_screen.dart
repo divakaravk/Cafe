@@ -22,7 +22,6 @@ class BillsScreen extends ConsumerStatefulWidget {
 }
 
 class _BillsScreenState extends ConsumerState<BillsScreen> {
-  String _selectedTrendMetric = 'revenue'; // 'revenue' or 'count'
   String _searchQuery = '';
   String _selectedPaymentFilter = 'ALL'; // 'ALL', 'CASH', 'UPI', 'CARD'
   bool _showFilters = false;
@@ -153,6 +152,20 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 reportNotifier,
                 () => _exportReportPdf(context, reportState, itemToCategory),
               ),
+
+              // Loading progress strip
+              if (reportState.isLoading)
+                LinearProgressIndicator(
+                  minHeight: 2,
+                  color: isDark
+                      ? AppColors.primaryAmber
+                      : AppColors.primaryOrange,
+                  backgroundColor: Colors.transparent,
+                ),
+
+              // Error banner
+              if (!reportState.isLoading && reportState.error != null)
+                _buildErrorBanner(reportState.error!, isDark, reportNotifier),
 
               // Date Filters
               if (_showFilters)
@@ -648,21 +661,21 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
           ),
           const SizedBox(width: 10),
           FilterChipWidget(
-            label: 'Current',
+            label: 'This Week',
             isSelected: state.filter == ReportDateFilter.thisWeek,
             onTap: () => notifier.setFilter(ReportDateFilter.thisWeek),
             isDark: isDark,
           ),
           const SizedBox(width: 10),
           FilterChipWidget(
-            label: 'Comparison',
+            label: 'Week Comparison',
             isSelected: state.filter == ReportDateFilter.weekComparison,
             onTap: () => notifier.setFilter(ReportDateFilter.weekComparison),
             isDark: isDark,
           ),
           const SizedBox(width: 10),
           FilterChipWidget(
-            label: 'Yearly',
+            label: 'Year Comparison',
             isSelected: state.filter == ReportDateFilter.yearComparison,
             onTap: () => notifier.setFilter(ReportDateFilter.yearComparison),
             isDark: isDark,
@@ -751,7 +764,10 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
 
     double? revenueTrend;
     if (state.comparisonBills.isNotEmpty) {
-      final prevRevenue = state.comparisonBills.fold<double>(0.0, (sum, b) => sum + b.totalAmount);
+      final prevRevenue = state.comparisonBills.fold<double>(
+        0.0,
+        (sum, b) => sum + b.totalAmount,
+      );
       if (prevRevenue > 0) {
         revenueTrend = ((totalRevenue - prevRevenue) / prevRevenue) * 100;
       }
@@ -766,7 +782,9 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
     }
 
     final cashShare = totalRevenue > 0 ? (state.cashTotal / totalRevenue) : 0.0;
-    final digitalShare = totalRevenue > 0 ? ((state.upiTotal + state.cardTotal) / totalRevenue) : 0.0;
+    final digitalShare = totalRevenue > 0
+        ? ((state.upiTotal + state.cardTotal) / totalRevenue)
+        : 0.0;
 
     return Column(
       children: [
@@ -814,7 +832,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 gradient: const [Color(0xFF00B09B), Color(0xFF96C93D)],
                 isDark: isDark,
                 progress: cashShare,
-                subtext: '${(cashShare * 100).toStringAsFixed(0)}% of total sales',
+                subtext:
+                    '${(cashShare * 100).toStringAsFixed(0)}% of total sales',
               ),
             ),
             const SizedBox(width: 12),
@@ -827,7 +846,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 gradient: const [Color(0xFFF2994A), Color(0xFFF2C94C)],
                 isDark: isDark,
                 progress: digitalShare,
-                subtext: '${(digitalShare * 100).toStringAsFixed(0)}% of total sales',
+                subtext:
+                    '${(digitalShare * 100).toStringAsFixed(0)}% of total sales',
               ),
             ),
           ],
@@ -851,11 +871,9 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
               : 'Sales Analysis',
           height: 350,
           isDark: isDark,
-          action: _buildMetricSelector(isDark),
           child: AnalysisChart(
             state: state,
             isDark: isDark,
-            metric: _selectedTrendMetric,
           ),
         );
 
@@ -955,32 +973,48 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
     );
   }
 
-  Widget _buildMetricSelector(bool isDark) {
-    final activeColor = isDark
-        ? AppColors.primaryAmber
-        : AppColors.primaryOrange;
+  Widget _buildErrorBanner(
+    String error,
+    bool isDark,
+    ReportNotifier notifier,
+  ) {
     return Container(
-      padding: const EdgeInsets.all(4),
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isDark ? AppColors.darkBg : Colors.grey.withValues(alpha: 0.1),
+        color: AppColors.error.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.error.withValues(alpha: 0.25)),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          _MetricOption(
-            icon: Icons.currency_rupee_rounded,
-            isSelected: _selectedTrendMetric == 'revenue',
-            onTap: () => setState(() => _selectedTrendMetric = 'revenue'),
-            activeColor: activeColor,
-            isDark: isDark,
+          const Icon(Icons.wifi_off_rounded, color: AppColors.error, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              error,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: AppColors.error,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
-          _MetricOption(
-            icon: Icons.numbers_rounded,
-            isSelected: _selectedTrendMetric == 'count',
-            onTap: () => setState(() => _selectedTrendMetric = 'count'),
-            activeColor: activeColor,
-            isDark: isDark,
+          TextButton(
+            onPressed: () => notifier.fetchReport(),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              'Retry',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                color: AppColors.error,
+              ),
+            ),
           ),
         ],
       ),
@@ -1050,30 +1084,34 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
             const SizedBox(height: 24),
             Row(
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Bill #${bill.billNumber ?? '-'}',
-                      style: GoogleFonts.inter(
-                        fontSize: 24,
-                        fontWeight: FontWeight.w900,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Bill #${bill.billNumber ?? '-'}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
-                    ),
-                    Text(
-                      bill.createdAt != null
-                          ? dateFormat.format(bill.createdAt!.toLocal())
-                          : '-',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        color: isDark
-                            ? AppColors.textWhiteMuted
-                            : AppColors.textDarkMuted,
+                      Text(
+                        bill.createdAt != null
+                            ? dateFormat.format(bill.createdAt!.toLocal())
+                            : '-',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: isDark
+                              ? AppColors.textWhiteMuted
+                              : AppColors.textDarkMuted,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-                const Spacer(),
+                const SizedBox(width: 12),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
@@ -1311,7 +1349,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     pw.Text(
-                      'CafePOS Sales Report',
+                      'RasaBhojan Sales Report',
                       style: pw.TextStyle(
                         fontSize: 24,
                         fontWeight: pw.FontWeight.bold,
@@ -1566,40 +1604,3 @@ class _BillCard extends StatelessWidget {
   }
 }
 
-class _MetricOption extends StatelessWidget {
-  final IconData icon;
-  final bool isSelected;
-  final VoidCallback onTap;
-  final Color activeColor;
-  final bool isDark;
-
-  const _MetricOption({
-    required this.icon,
-    required this.isSelected,
-    required this.onTap,
-    required this.activeColor,
-    required this.isDark,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 300),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: isSelected ? activeColor : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Icon(
-          icon,
-          size: 16,
-          color: isSelected
-              ? (isDark ? Colors.black : Colors.white)
-              : (isDark ? Colors.white38 : Colors.black38),
-        ),
-      ),
-    );
-  }
-}

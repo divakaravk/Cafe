@@ -18,27 +18,62 @@ class SupabaseService {
   static Future<Map<String, dynamic>> signInWithUserMaster({
     required String input,
     required String password,
+    bool forceLogin = false,
   }) async {
-    // Search by username or email (case-insensitive)
-    final res = await client
+    final trimmed = input.trim();
+
+    // Step 1 — find user by username OR email (no password in query to get
+    // a precise error message when only the password is wrong)
+    final List<dynamic> rows = await client
         .from('user_profiles')
         .select()
-        .or('username.ilike.$input,user_email.ilike.$input')
-        .eq('password', password)
-        .eq('user_active', true)
-        .maybeSingle();
+        .or('username.ilike.$trimmed,user_email.ilike.$trimmed')
+        .limit(1);
 
-    if (res == null) {
-      throw 'Invalid username/email or password';
+    if (rows.isEmpty) {
+      throw 'No account found for "$trimmed". Check your username or email.';
     }
 
-    return res;
+    final userRow = Map<String, dynamic>.from(rows.first as Map);
+
+    // Step 2 — active check
+    if (!(userRow['user_active'] as bool? ?? true)) {
+      throw 'This account is deactivated. Contact your administrator.';
+    }
+
+    // Step 3 — password check (plain-text comparison, same as before)
+    final stored = userRow['password'] as String? ?? '';
+    if (stored != password) {
+      throw 'Incorrect password. Please try again.';
+    }
+
+    // Step 4 — concurrent session check
+    if ((userRow['is_login'] as bool? ?? false) && !forceLogin) {
+      throw 'ALREADY_LOGGED_IN';
+    }
+
+    // Step 5 — stamp is_login + last_login (best-effort; never blocks login)
+    try {
+      final now = DateTime.now().toUtc().toIso8601String();
+      await client
+          .from('user_profiles')
+          .update({'is_login': true, 'last_login': now})
+          .eq('id', userRow['id'] as String);
+      return {...userRow, 'is_login': true, 'last_login': now};
+    } catch (_) {
+      // Update failed (RLS / trigger issue) — login still succeeds
+      return userRow;
+    }
+  }
+
+  static Future<void> setLoginStatus(String userId, bool isLogin) async {
+    await client
+        .from('user_profiles')
+        .update({'is_login': isLogin})
+        .eq('id', userId);
   }
 
   static Future<void> signOut() async {
-    // Since we are bypassing Supabase Auth,
-    // actual signOut only affects the Supabase client state,
-    // but the local session should be cleared in the provider.
     await client.auth.signOut();
   }
 

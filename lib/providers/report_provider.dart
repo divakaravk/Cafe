@@ -1,4 +1,4 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:async';
 import 'package:flutter_riverpod/legacy.dart';
 import '../models/models.dart';
 import '../core/services/supabase_service.dart';
@@ -299,7 +299,7 @@ class ReportNotifier extends StateNotifier<ReportState> {
         companyId,
         startDate: start,
         endDate: end,
-      );
+      ).timeout(const Duration(seconds: 15));
       final bills = res.map((e) => Bill.fromJson(e)).toList();
 
       List<Bill> comparisonBills = [];
@@ -308,7 +308,7 @@ class ReportNotifier extends StateNotifier<ReportState> {
           companyId,
           startDate: compStart,
           endDate: compEnd,
-        );
+        ).timeout(const Duration(seconds: 15));
         comparisonBills = compRes.map((e) => Bill.fromJson(e)).toList();
       }
 
@@ -316,9 +316,24 @@ class ReportNotifier extends StateNotifier<ReportState> {
         bills: bills,
         comparisonBills: comparisonBills,
         isLoading: false,
+        error: null,
+      );
+    } on TimeoutException {
+      state = state.copyWith(
+        isLoading: false,
+        error: 'Request timed out. Check your internet connection and try again.',
       );
     } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
+      final msg = e.toString().toLowerCase();
+      final userMsg = msg.contains('socket') ||
+              msg.contains('network') ||
+              msg.contains('connection') ||
+              msg.contains('unreachable')
+          ? 'No internet connection. Pull down to refresh.'
+          : msg.contains('server') || msg.contains('500') || msg.contains('503')
+          ? 'Server error. Please try again in a moment.'
+          : 'Failed to load report: ${e.toString()}';
+      state = state.copyWith(isLoading: false, error: userMsg);
     }
   }
 }

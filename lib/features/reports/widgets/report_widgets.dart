@@ -393,13 +393,28 @@ class AnalysisChart extends StatelessWidget {
   }
 
   Widget _buildWeekComparisonChart() {
-    final isRevenue = metric == 'revenue';
-    final currentTrends = isRevenue ? state.salesTrends : state.ordersTrends;
+    final currentTrends = state.salesTrends;
+    final compTrends = <DateTime, double>{};
+    for (final b in state.comparisonBills) {
+      if (b.createdAt == null) continue;
+      final d = DateTime(
+        b.createdAt!.toLocal().year,
+        b.createdAt!.toLocal().month,
+        b.createdAt!.toLocal().day,
+      );
+      compTrends[d] = (compTrends[d] ?? 0) + b.totalAmount;
+    }
 
-    // For simplicity in this UI demo, we'll just compare totals or show a trend
-    // Let's do a grouped bar Chart with 7 groups
     final sortedDates = currentTrends.keys.toList()..sort();
     if (sortedDates.isEmpty) return _buildEmptyState();
+
+    final allVals = [
+      ...currentTrends.values,
+      ...compTrends.values,
+    ];
+    final maxY = allVals.isEmpty
+        ? 100.0
+        : allVals.reduce((a, b) => a > b ? a : b) * 1.25;
 
     return Column(
       children: [
@@ -407,25 +422,25 @@ class AnalysisChart extends StatelessWidget {
           child: BarChart(
             BarChartData(
               alignment: BarChartAlignment.spaceAround,
-              maxY: state.totalRevenue > 0
-                  ? (state.totalRevenue / 7) * 2
-                  : 100.0,
+              maxY: maxY,
               barGroups: List.generate(sortedDates.length, (i) {
+                final currentDate = sortedDates[i];
+                final compDate = currentDate.subtract(const Duration(days: 7));
                 return BarChartGroupData(
                   x: i,
                   barsSpace: 4,
                   barRods: [
                     BarChartRodData(
-                      toY: currentTrends[sortedDates[i]]!,
+                      toY: currentTrends[currentDate] ?? 0,
                       color: AppColors.primaryAmber,
                       width: 8,
+                      borderRadius: BorderRadius.circular(4),
                     ),
                     BarChartRodData(
-                      toY:
-                          (currentTrends[sortedDates[i]]! *
-                          0.8), // Placeholder for demo if no data
-                      color: isDark ? Colors.white24 : Colors.black12,
+                      toY: compTrends[compDate] ?? 0,
+                      color: isDark ? Colors.white24 : Colors.black26,
                       width: 8,
+                      borderRadius: BorderRadius.circular(4),
                     ),
                   ],
                 );

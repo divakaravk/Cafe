@@ -227,6 +227,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
     final size = MediaQuery.of(context).size;
     final isMobile = size.width < 600;
     final showSearchInHeader = size.width > 720;
+    final canPop = Navigator.of(context).canPop();
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -246,8 +247,17 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
       child: Row(
         children: [
           IconButton(
-            icon: Icon(Icons.menu_rounded, size: isMobile ? 22 : 24),
-            onPressed: () => Scaffold.of(context).openDrawer(),
+            icon: Icon(
+              canPop ? Icons.arrow_back_ios_new_rounded : Icons.menu_rounded,
+              size: isMobile ? 22 : 24,
+            ),
+            onPressed: () {
+              if (canPop) {
+                Navigator.of(context).pop();
+              } else {
+                Scaffold.maybeOf(context)?.openDrawer();
+              }
+            },
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
           ),

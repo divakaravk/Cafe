@@ -12,7 +12,9 @@ import '../../../models/models.dart';
 // ─── Validators ─────────────────────────────────────────────────────────────
 
 final _panRegex = RegExp(r'^[A-Z]{5}[0-9]{4}[A-Z]{1}$');
-final _gstinRegex = RegExp(r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$');
+final _gstinRegex = RegExp(
+  r'^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$',
+);
 
 String? _validatePan(String? v) {
   if (v == null || v.trim().isEmpty) return null;
@@ -59,13 +61,13 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
   late final TextEditingController _panController;
 
   // Focus nodes — chain with textInputAction: TextInputAction.next
-  final _nameFocus    = FocusNode();
-  final _codeFocus    = FocusNode();
-  final _emailFocus   = FocusNode();
-  final _phoneFocus   = FocusNode();
+  final _nameFocus = FocusNode();
+  final _codeFocus = FocusNode();
+  final _emailFocus = FocusNode();
+  final _phoneFocus = FocusNode();
   final _addressFocus = FocusNode();
-  final _gstinFocus   = FocusNode();
-  final _panFocus     = FocusNode();
+  final _gstinFocus = FocusNode();
+  final _panFocus = FocusNode();
 
   String _selectedCountry = 'India';
   String? _selectedState;
@@ -77,14 +79,14 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
   @override
   void initState() {
     super.initState();
-    _nameController    = TextEditingController();
-    _codeController    = TextEditingController();
-    _emailController   = TextEditingController();
-    _phoneController   = TextEditingController();
+    _nameController = TextEditingController();
+    _codeController = TextEditingController();
+    _emailController = TextEditingController();
+    _phoneController = TextEditingController();
     _addressController = TextEditingController();
-    _cityController    = TextEditingController();
-    _gstinController   = TextEditingController();
-    _panController     = TextEditingController();
+    _cityController = TextEditingController();
+    _gstinController = TextEditingController();
+    _panController = TextEditingController();
     _loadCompanyData();
   }
 
@@ -116,30 +118,32 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
     try {
       final user = ref.read(authStateProvider).value;
       if (user == null) return;
-      final data = await SupabaseService.getCompany(user.companyId)
-          .timeout(const Duration(seconds: 15));
+      final data = await SupabaseService.getCompany(
+        user.companyId,
+      ).timeout(const Duration(seconds: 15));
       if (data != null && mounted) {
         _company = Company.fromJson(data);
-        _nameController.text    = _company!.companyName;
-        _codeController.text    = _company!.companyCode;
-        _emailController.text   = data['email']      ?? '';
-        _phoneController.text   = data['phone']      ?? '';
-        _addressController.text = data['address']    ?? '';
-        _cityController.text    = data['city']       ?? '';
-        _gstinController.text   = data['gstin']      ?? '';
-        _panController.text     = data['pan_number'] ?? '';
-        _hasGst              = data['has_gst']              ?? false;
-        _hasTableManagement  = data['has_table_management'] ?? true;
-        _hasItemVariants     = data['has_item_variants']    ?? false;
-        _selectedCountry     = data['country'] ?? 'India';
-        _selectedState       = data['state'];
-        _selectedDistrict    = data['city'];
+        _nameController.text = _company!.companyName;
+        _codeController.text = _company!.companyCode;
+        _emailController.text = data['email'] ?? '';
+        _phoneController.text = data['phone'] ?? '';
+        _addressController.text = data['address'] ?? '';
+        _cityController.text = data['city'] ?? '';
+        _gstinController.text = data['gstin'] ?? '';
+        _panController.text = data['pan_number'] ?? '';
+        _hasGst = data['has_gst'] ?? false;
+        _hasTableManagement = data['has_table_management'] ?? true;
+        _hasItemVariants = data['has_item_variants'] ?? false;
+        _selectedCountry = data['country'] ?? 'India';
+        _selectedState = data['state'];
+        _selectedDistrict = data['city'];
         setState(() {});
       } else if (mounted) {
         _showError('Company data not found.', onRetry: _loadCompanyData);
       }
     } on TimeoutException {
-      if (mounted) _showError('Connection timed out.', onRetry: _loadCompanyData);
+      if (mounted)
+        _showError('Connection timed out.', onRetry: _loadCompanyData);
     } catch (e) {
       if (mounted) _showError('Failed to load: $e', onRetry: _loadCompanyData);
     } finally {
@@ -159,24 +163,30 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
     final updatedData = {
       'company_name': _nameController.text.trim(),
       'company_code': _codeController.text.trim(),
-      'email':        _emailController.text.trim(),
-      'phone':        _phoneController.text.trim(),
-      'address':      _addressController.text.trim(),
-      'city':         _selectedDistrict ?? _cityController.text.trim(),
-      'state':        _selectedState,
-      'country':      _selectedCountry,
-      'has_gst':      _hasGst,
-      'gstin':        _gstinController.text.trim(),
-      'pan_number':   _panController.text.trim(),
+      'email': _emailController.text.trim(),
+      'phone': _phoneController.text.trim(),
+      'address': _addressController.text.trim(),
+      'city': _selectedDistrict ?? _cityController.text.trim(),
+      'state': _selectedState,
+      'country': _selectedCountry,
+      'has_gst': _hasGst,
+      'gstin': _gstinController.text.trim(),
+      'pan_number': _panController.text.trim(),
       'has_table_management': _hasTableManagement,
-      'has_item_variants':    _hasItemVariants,
+      'has_item_variants': _hasItemVariants,
     };
     try {
-      await SupabaseService.updateCompany(_company!.id, updatedData)
-          .timeout(const Duration(seconds: 15));
+      await SupabaseService.updateCompany(
+        _company!.id,
+        updatedData,
+      ).timeout(const Duration(seconds: 15));
       if (mounted) _showSuccess('Company details updated successfully.');
     } on TimeoutException {
-      if (mounted) _showError('Request timed out. Check your connection.', onRetry: _saveChanges);
+      if (mounted)
+        _showError(
+          'Request timed out. Check your connection.',
+          onRetry: _saveChanges,
+        );
     } catch (e) {
       if (mounted) _showError('Failed to update: $e', onRetry: _saveChanges);
     } finally {
@@ -187,25 +197,33 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
   // ─── Feedback ──────────────────────────────────────────────────────────────
 
   void _showSuccess(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: GoogleFonts.inter(fontSize: 13)),
-      backgroundColor: AppColors.success,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: GoogleFonts.inter(fontSize: 13)),
+        backgroundColor: AppColors.success,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   void _showError(String msg, {VoidCallback? onRetry}) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg, style: GoogleFonts.inter(fontSize: 13)),
-      backgroundColor: AppColors.error,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      duration: const Duration(seconds: 6),
-      action: onRetry != null
-          ? SnackBarAction(label: 'RETRY', textColor: Colors.white, onPressed: onRetry)
-          : null,
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: GoogleFonts.inter(fontSize: 13)),
+        backgroundColor: AppColors.error,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 6),
+        action: onRetry != null
+            ? SnackBarAction(
+                label: 'RETRY',
+                textColor: Colors.white,
+                onPressed: onRetry,
+              )
+            : null,
+      ),
+    );
   }
 
   // ─── Build ─────────────────────────────────────────────────────────────────
@@ -227,7 +245,10 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
               key: _formKey,
               child: ListView(
                 padding: EdgeInsets.fromLTRB(
-                  hPad, 20, hPad, 24 + mq.padding.bottom,
+                  hPad,
+                  20,
+                  hPad,
+                  24 + mq.padding.bottom,
                 ),
                 children: [
                   _buildProfileHeader(isDark, isWide),
@@ -353,7 +374,10 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
                 if (_codeController.text.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.white.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(6),
@@ -374,7 +398,9 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
                   children: [
                     _headerChip(
                       _hasTableManagement ? 'Tables ON' : 'Tables OFF',
-                      _hasTableManagement ? Icons.table_restaurant_rounded : Icons.table_restaurant_outlined,
+                      _hasTableManagement
+                          ? Icons.table_restaurant_rounded
+                          : Icons.table_restaurant_outlined,
                     ),
                     const SizedBox(width: 8),
                     _headerChip(
@@ -392,27 +418,27 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
   }
 
   Widget _headerChip(String label, IconData icon) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
-          borderRadius: BorderRadius.circular(20),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: 0.18),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 11, color: Colors.white),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 11, color: Colors.white),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-      );
+      ],
+    ),
+  );
 
   // ─── Sections ──────────────────────────────────────────────────────────────
 
@@ -453,7 +479,8 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
           label: 'Email Address',
           icon: Icons.email_outlined,
           keyboardType: TextInputType.emailAddress,
-          validator: (v) => v!.isNotEmpty && !v.contains('@') ? 'Invalid email' : null,
+          validator: (v) =>
+              v!.isNotEmpty && !v.contains('@') ? 'Invalid email' : null,
           isDark: isDark,
         ),
         const SizedBox(height: 14),
@@ -622,7 +649,9 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
             disabledBackgroundColor: Colors.transparent,
             shadowColor: Colors.transparent,
             padding: EdgeInsets.zero,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
           ),
           child: Ink(
             decoration: BoxDecoration(
@@ -707,7 +736,8 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
       maxLength: maxLength,
       validator: validator,
       keyboardType: keyboardType,
-      textInputAction: textInputAction ??
+      textInputAction:
+          textInputAction ??
           (nextFocus != null ? TextInputAction.next : TextInputAction.done),
       inputFormatters: formatters,
       onChanged: onChanged,
@@ -738,7 +768,10 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.primaryAmber, width: 1.5),
+          borderSide: const BorderSide(
+            color: AppColors.primaryAmber,
+            width: 1.5,
+          ),
         ),
         errorBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
@@ -750,7 +783,10 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
         ),
         filled: true,
         fillColor: isDark ? AppColors.darkBg : Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 14,
+        ),
       ),
     );
   }
@@ -769,10 +805,12 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
       isExpanded: true,
       menuMaxHeight: 300,
       items: items
-          .map((s) => DropdownMenuItem(
-                value: s,
-                child: Text(s, style: GoogleFonts.inter(fontSize: 14)),
-              ))
+          .map(
+            (s) => DropdownMenuItem(
+              value: s,
+              child: Text(s, style: GoogleFonts.inter(fontSize: 14)),
+            ),
+          )
           .toList(),
       onChanged: onChanged,
       decoration: InputDecoration(
@@ -789,11 +827,17 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.primaryAmber, width: 1.5),
+          borderSide: const BorderSide(
+            color: AppColors.primaryAmber,
+            width: 1.5,
+          ),
         ),
         filled: true,
         fillColor: isDark ? AppColors.darkBg : Colors.white,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 14,
+        ),
       ),
     );
   }
@@ -825,7 +869,9 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
                 subtitle,
                 style: GoogleFonts.inter(
                   fontSize: 12,
-                  color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                  color: isDark
+                      ? AppColors.textWhiteMuted
+                      : AppColors.textDarkMuted,
                 ),
               ),
             ],
@@ -890,7 +936,9 @@ class _SectionCard extends StatelessWidget {
                 color: accentColor.withValues(alpha: isDark ? 0.1 : 0.06),
                 border: Border(
                   bottom: BorderSide(
-                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                    color: isDark
+                        ? AppColors.darkBorder
+                        : AppColors.lightBorder,
                   ),
                   left: BorderSide(color: accentColor, width: 3),
                 ),
@@ -932,6 +980,5 @@ class UpperCaseTextFormatter extends TextInputFormatter {
   TextEditingValue formatEditUpdate(
     TextEditingValue oldValue,
     TextEditingValue newValue,
-  ) =>
-      newValue.copyWith(text: newValue.text.toUpperCase());
+  ) => newValue.copyWith(text: newValue.text.toUpperCase());
 }

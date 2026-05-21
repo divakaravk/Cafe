@@ -2,7 +2,7 @@
 class AppConstants {
   AppConstants._();
 
-  static const String appName = 'CafePOS';
+  static const String appName = 'RasaBhojan';
   static const String appVersion = '1.0.0';
 
   // Supabase - Replace with your actual values

@@ -33,17 +33,17 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
     }
   }
 
-  Future<void> signIn(String input, String password) async {
+  Future<void> signIn(String input, String password, {bool force = false}) async {
     state = const AsyncValue.loading();
     try {
       final profileJson = await SupabaseService.signInWithUserMaster(
         input: input,
         password: password,
+        forceLogin: force,
       );
 
       final profile = UserProfile.fromJson(profileJson);
 
-      // Save session locally
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_sessionKey, jsonEncode(profileJson));
 
@@ -59,6 +59,13 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
   }
 
   Future<void> signOut() async {
+    // Clear is_login flag in DB (best-effort)
+    final currentUser = state.value;
+    if (currentUser != null) {
+      try {
+        await SupabaseService.setLoginStatus(currentUser.id, false);
+      } catch (_) {}
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionKey);
     await SupabaseService.signOut();

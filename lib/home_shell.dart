@@ -16,6 +16,7 @@ import 'features/admin/presentation/company_master_screen.dart';
 import 'features/admin/presentation/user_master_screen.dart';
 import 'features/admin/presentation/item_master_screen.dart';
 import 'features/kitchen/kitchen_screen.dart';
+import 'features/admin/presentation/my_profile_screen.dart';
 
 /// Main app shell — switches between login and POS based on auth state
 class HomeShell extends ConsumerWidget {
@@ -112,37 +113,7 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
       ),
       child: Column(
         children: [
-          DrawerHeader(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [AppColors.primaryAmber, AppColors.primaryOrange],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-            ),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.restaurant_rounded,
-                    color: Colors.white,
-                    size: 42,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'CafePOS',
-                    style: GoogleFonts.inter(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildDrawerUserHeader(isDark),
           Expanded(
             child: ListView(
               padding: EdgeInsets.only(
@@ -274,7 +245,15 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                 _buildDrawerItem(
                   Icons.person_outline_rounded,
                   'My Profile',
-                  () {},
+                  () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => MyProfileScreen(user: widget.user),
+                      ),
+                    );
+                  },
                   isDark,
                 ),
                 _buildDrawerItem(
@@ -291,6 +270,163 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
       ),
     );
   }
+
+  String _formatDateTime(DateTime dt) {
+    final local = dt.toLocal();
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final h = local.hour % 12 == 0 ? 12 : local.hour % 12;
+    final m = local.minute.toString().padLeft(2, '0');
+    final ampm = local.hour < 12 ? 'AM' : 'PM';
+    return '${months[local.month - 1]} ${local.day}, ${local.year}  $h:$m $ampm';
+  }
+
+  Widget _buildDrawerUserHeader(bool isDark) {
+    final user = widget.user;
+    final initials = user.fullName.isNotEmpty
+        ? user.fullName
+            .split(' ')
+            .take(2)
+            .map((w) => w.isNotEmpty ? w[0] : '')
+            .join()
+            .toUpperCase()
+        : '?';
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.only(
+        top: MediaQuery.of(context).padding.top + 16,
+        left: 20,
+        right: 20,
+        bottom: 20,
+      ),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppColors.primaryAmber, AppColors.primaryOrange],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // App brand logo
+          Image.asset(
+            'assets/rasabhojan.png',
+            height: 36,
+            fit: BoxFit.contain,
+          ),
+          const SizedBox(height: 14),
+          // Avatar + name
+          Row(
+            children: [
+              // Avatar
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.6), width: 2),
+                ),
+                child: ClipOval(
+                  child: user.avatarUrl != null && user.avatarUrl!.isNotEmpty
+                      ? Image.network(user.avatarUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              _initialsAvatar(initials))
+                      : _initialsAvatar(initials),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      user.fullName,
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 3),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        user.role.toUpperCase(),
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Last login row
+          Row(
+            children: [
+              Icon(Icons.access_time_rounded,
+                  size: 12, color: Colors.white.withValues(alpha: 0.75)),
+              const SizedBox(width: 5),
+              Text(
+                'Last login: ',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  color: Colors.white.withValues(alpha: 0.75),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  user.lastLogin != null
+                      ? _formatDateTime(user.lastLogin!)
+                      : 'First login',
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _initialsAvatar(String initials) => Container(
+        color: Colors.white.withValues(alpha: 0.25),
+        child: Center(
+          child: Text(
+            initials,
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      );
 
   Widget _buildDrawerSection(String title, bool isDark) {
     return Padding(

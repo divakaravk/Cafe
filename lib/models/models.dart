@@ -57,6 +57,8 @@ class UserProfile {
   final String? email;
   final String? avatarUrl;
   final bool isActive;
+  final bool isLogin;
+  final DateTime? lastLogin;
   final DateTime? createdAt;
 
   UserProfile({
@@ -70,6 +72,8 @@ class UserProfile {
     this.email,
     this.avatarUrl,
     this.isActive = true,
+    this.isLogin = false,
+    this.lastLogin,
     this.createdAt,
   });
 
@@ -90,6 +94,10 @@ class UserProfile {
     email: json['user_email'] as String?,
     avatarUrl: json['avatar_url'] as String?,
     isActive: json['user_active'] as bool? ?? true,
+    isLogin: json['is_login'] as bool? ?? false,
+    lastLogin: json['last_login'] != null
+        ? DateTime.parse(json['last_login'] as String)
+        : null,
     createdAt: json['created_at'] != null
         ? DateTime.parse(json['created_at'] as String)
         : null,
@@ -106,6 +114,7 @@ class UserProfile {
     'user_email': email,
     'avatar_url': avatarUrl,
     'user_active': isActive,
+    'is_login': isLogin,
   };
 }
 

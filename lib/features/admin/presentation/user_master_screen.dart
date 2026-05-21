@@ -100,8 +100,9 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
 
   Future<bool> _hasNetwork() async {
     try {
-      final result = await InternetAddress.lookup('google.com')
-          .timeout(const Duration(seconds: 5));
+      final result = await InternetAddress.lookup(
+        'google.com',
+      ).timeout(const Duration(seconds: 5));
       return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
     } catch (_) {
       return false;
@@ -134,7 +135,10 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
         );
       }
     } on TimeoutException {
-      _showError('Request timed out. Check your connection.', onRetry: _loadUsers);
+      _showError(
+        'Request timed out. Check your connection.',
+        onRetry: _loadUsers,
+      );
     } on SocketException {
       _showError('Network error. Check your connection.', onRetry: _loadUsers);
     } catch (e) {
@@ -185,7 +189,10 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
     } on TimeoutException {
       _showError('Request timed out.', onRetry: () => _startEdit(user));
     } on SocketException {
-      _showError('Network error. Check your connection.', onRetry: () => _startEdit(user));
+      _showError(
+        'Network error. Check your connection.',
+        onRetry: () => _startEdit(user),
+      );
     } catch (e) {
       _showError('Failed to load user: $e', onRetry: () => _startEdit(user));
     } finally {
@@ -274,11 +281,109 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
         _loadUsers();
       }
     } on TimeoutException {
-      _showError('Request timed out. Check your connection.', onRetry: _saveUser);
+      _showError(
+        'Request timed out. Check your connection.',
+        onRetry: _saveUser,
+      );
     } on SocketException {
       _showError('Network error. Check your connection.', onRetry: _saveUser);
     } catch (e) {
       _showError('Failed to save: $e', onRetry: _saveUser);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // ─── Force logout ──────────────────────────────────────────────────────────
+
+  Future<void> _forceLogoutUser(UserProfile user) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.logout_rounded,
+                  color: AppColors.error, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Force Logout',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        content: RichText(
+          text: TextSpan(
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: Theme.of(ctx).textTheme.bodyMedium?.color,
+            ),
+            children: [
+              const TextSpan(text: 'Deactivate '),
+              TextSpan(
+                text: user.fullName,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              const TextSpan(
+                text:
+                    '? They will be unable to login until reactivated by an admin.',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel',
+                style: GoogleFonts.inter(
+                    color: Theme.of(ctx).textTheme.bodySmall?.color)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: const Icon(Icons.logout_rounded, size: 16),
+            label: Text('Force Logout',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    if (!await _checkNetworkAndWarn()) return;
+
+    setState(() => _isLoading = true);
+    try {
+      await SupabaseService.client
+          .from('user_profiles')
+          .update({'user_active': false, 'is_login': false})
+          .eq('id', user.id)
+          .timeout(const Duration(seconds: 10));
+
+      _showSuccess('${user.fullName} has been logged out and deactivated.');
+      _loadUsers();
+    } on TimeoutException {
+      _showError('Request timed out.',
+          onRetry: () => _forceLogoutUser(user));
+    } on SocketException {
+      _showError('Network error.', onRetry: () => _forceLogoutUser(user));
+    } catch (e) {
+      _showError('Failed: $e', onRetry: () => _forceLogoutUser(user));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -649,13 +754,76 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
                             ],
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          color: isDark
-                              ? AppColors.textWhiteMuted
-                              : AppColors.textDarkMuted,
-                          size: 20,
+                        PopupMenuButton<String>(
+                          onSelected: (value) {
+                            if (value == 'edit') _startEdit(user);
+                            if (value == 'logout') _forceLogoutUser(user);
+                          },
+                          itemBuilder: (_) => [
+                            PopupMenuItem(
+                              value: 'edit',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.edit_outlined,
+                                      size: 16,
+                                      color: isDark
+                                          ? AppColors.textWhiteMuted
+                                          : AppColors.textDarkMuted),
+                                  const SizedBox(width: 10),
+                                  Text('Edit User',
+                                      style: GoogleFonts.inter(fontSize: 13)),
+                                ],
+                              ),
+                            ),
+                            if (user.isActive)
+                              PopupMenuItem(
+                                value: 'logout',
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.logout_rounded,
+                                        size: 16, color: AppColors.error),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      'Force Logout',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: AppColors.error,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (!user.isActive)
+                              PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.person_add_outlined,
+                                        size: 16, color: AppColors.success),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      'Reactivate',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: AppColors.success,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                          icon: Icon(
+                            Icons.more_vert_rounded,
+                            size: 20,
+                            color: isDark
+                                ? AppColors.textWhiteMuted
+                                : AppColors.textDarkMuted,
+                          ),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          elevation: 4,
                         ),
                       ],
                     ),
@@ -841,7 +1009,10 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
                       gradient: LinearGradient(
                         colors: isDark
                             ? [AppColors.darkSurface, AppColors.darkBg]
-                            : [rc.withValues(alpha: 0.18), rc.withValues(alpha: 0.03)],
+                            : [
+                                rc.withValues(alpha: 0.18),
+                                rc.withValues(alpha: 0.03),
+                              ],
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
                       ),
@@ -937,13 +1108,22 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
                         ),
                         child: ClipOval(
                           child: _pickedImage != null
-                              ? Image.file(File(_pickedImage!.path), fit: BoxFit.cover)
+                              ? Image.file(
+                                  File(_pickedImage!.path),
+                                  fit: BoxFit.cover,
+                                )
                               : _avatarUrl != null
-                                  ? Image.network(_avatarUrl!, fit: BoxFit.cover)
-                                  : Container(
-                                      color: rc.withValues(alpha: isDark ? 0.15 : 0.08),
-                                      child: Icon(Icons.person_rounded, size: 46, color: rc),
-                                    ),
+                              ? Image.network(_avatarUrl!, fit: BoxFit.cover)
+                              : Container(
+                                  color: rc.withValues(
+                                    alpha: isDark ? 0.15 : 0.08,
+                                  ),
+                                  child: Icon(
+                                    Icons.person_rounded,
+                                    size: 46,
+                                    color: rc,
+                                  ),
+                                ),
                         ),
                       ),
                       Positioned(
@@ -968,8 +1148,11 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
                                 ),
                               ],
                             ),
-                            child: const Icon(Icons.camera_alt_rounded,
-                                size: 14, color: Colors.white),
+                            child: const Icon(
+                              Icons.camera_alt_rounded,
+                              size: 14,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
                       ),

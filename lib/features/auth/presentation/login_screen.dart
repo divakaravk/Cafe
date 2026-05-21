@@ -28,9 +28,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     super.dispose();
   }
 
-  Future<void> _signIn() async {
-    if (_emailController.text.trim().isEmpty ||
-        _passwordController.text.isEmpty) {
+  Future<void> _signIn({bool force = false}) async {
+    if (!force &&
+        (_emailController.text.trim().isEmpty ||
+            _passwordController.text.isEmpty)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -50,11 +51,84 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
     setState(() => _isLoading = true);
     try {
-      await ref
-          .read(authStateProvider.notifier)
-          .signIn(_emailController.text.trim(), _passwordController.text);
+      await ref.read(authStateProvider.notifier).signIn(
+            _emailController.text.trim(),
+            _passwordController.text,
+            force: force,
+          );
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _handleAlreadyLoggedIn() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.devices_rounded,
+                  color: AppColors.warning, size: 22),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Already Signed In',
+              style: GoogleFonts.outfit(
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+                color: isDark ? AppColors.textWhite : AppColors.textDark,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'This account is already active on another device.\n\nSigning in here will end the session on that device.',
+          style: GoogleFonts.outfit(
+            fontSize: 13,
+            height: 1.6,
+            color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+          ),
+        ),
+        actionsPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel',
+                style: GoogleFonts.outfit(
+                    color: isDark
+                        ? AppColors.textWhiteMuted
+                        : AppColors.textDarkMuted)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primaryAmber,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+            icon: const Icon(Icons.login_rounded, size: 16),
+            label: Text('Sign In Anyway',
+                style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      await _signIn(force: true);
     }
   }
 
@@ -90,10 +164,18 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
     ref.listen(authStateProvider, (prev, next) {
       if (next is AsyncError) {
+        final err = next.error.toString();
+
+        if (err == 'ALREADY_LOGGED_IN') {
+          // Show "already signed in" dialog — no shake/snackbar
+          _handleAlreadyLoggedIn();
+          return;
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Login failed: ${(next as AsyncError).error}',
+              'Login failed: $err',
               style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
             ),
             backgroundColor: AppColors.error,
@@ -214,16 +296,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           curve: Curves.easeOutBack,
                         ),
                     const SizedBox(height: 24),
-                    Text(
-                      'CafePOS',
-                      style: GoogleFonts.outfit(
-                        fontSize: 32,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.5,
-                        color: isDark
-                            ? AppColors.textWhite
-                            : AppColors.textDark,
-                      ),
+                    Image.asset(
+                      'assets/rasabhojan.png',
+                      height: 72,
+                      fit: BoxFit.contain,
                     ).animate().fadeIn(delay: 100.ms, duration: 400.ms),
                     const SizedBox(height: 6),
                     Text(
@@ -690,20 +766,10 @@ class BrandIntroductionPanel extends StatelessWidget {
           // Header Logo Tag
           Row(
             children: [
-              Icon(
-                Icons.local_cafe_rounded,
-                color: AppColors.primaryAmber,
-                size: 26,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'CafePOS',
-                style: GoogleFonts.outfit(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  color: isDark ? AppColors.textWhite : AppColors.textDark,
-                  letterSpacing: 0.5,
-                ),
+              Image.asset(
+                'assets/rasabhojan.png',
+                height: 48,
+                fit: BoxFit.contain,
               ),
             ],
           ).animate().fadeIn(duration: 400.ms),

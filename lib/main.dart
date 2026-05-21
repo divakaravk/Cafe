@@ -37,7 +37,7 @@ class CafePosApp extends ConsumerWidget {
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: overlayStyle,
       child: MaterialApp(
-        title: 'CafePOS',
+        title: 'RasaBhojan',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
