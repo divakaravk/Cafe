@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -234,8 +235,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                         isTablet,
                       ),
                       loading: () => _buildSkeletonGrid(isDark),
-                      error: (e, _) =>
-                          Center(child: Text('Error loading items: $e')),
+                      error: (e, _) => _buildNetworkErrorState(e, isDark, user),
                     ),
                     // Floating Microphone Button
                     if (_isVoiceAIEnabled)
@@ -1000,6 +1000,85 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
             .fadeIn(delay: (20 * index).ms)
             .scale(begin: const Offset(0.9, 0.9));
       },
+    );
+  }
+
+  bool _isNetworkError(Object e) {
+    if (e is SocketException) return true;
+    if (e is ApiException && e.type == ApiErrorType.network) return true;
+    final msg = e.toString().toLowerCase();
+    return msg.contains('socketexception') ||
+        msg.contains('failed host lookup') ||
+        msg.contains('network is unreachable') ||
+        msg.contains('connection refused') ||
+        msg.contains('no internet');
+  }
+
+  Widget _buildNetworkErrorState(Object e, bool isDark, UserProfile user) {
+    final isNetwork = _isNetworkError(e);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: (isNetwork ? AppColors.primaryOrange : AppColors.error)
+                    .withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                isNetwork ? Icons.wifi_off_rounded : Icons.error_outline_rounded,
+                size: 40,
+                color: isNetwork ? AppColors.primaryOrange : AppColors.error,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              isNetwork ? 'No Internet Connection' : 'Failed to Load Items',
+              style: GoogleFonts.inter(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: isDark ? AppColors.textWhite : AppColors.textDark,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              isNetwork
+                  ? 'Check your network and tap Retry'
+                  : 'Something went wrong. Please try again.',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => ref.invalidate(itemGroupsProvider(user.companyId)),
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: Text(
+                'Retry',
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14,
+                ),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primaryOrange,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
