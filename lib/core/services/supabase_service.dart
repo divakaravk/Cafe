@@ -372,6 +372,54 @@ class SupabaseService {
     return totals;
   }
 
+  /// Returns all bill items for a session, each tagged with cover_number/cover_label.
+  static Future<List<Map<String, dynamic>>> getDetailedItemsForSession(
+      String sessionId) async {
+    final bills = await client
+        .from('bill_master')
+        .select('id, cover_id')
+        .eq('table_session_id', sessionId);
+    if ((bills as List).isEmpty) return [];
+
+    final billIds = bills.map<String>((b) => b['id'] as String).toList();
+    final coverIdByBill = <String, String?>{
+      for (final b in bills) b['id'] as String: b['cover_id'] as String?,
+    };
+
+    final itemRows = await client
+        .from('bill_item')
+        .select('item_name_snapshot, qty, rate_snapshot, bill_id')
+        .inFilter('bill_id', billIds);
+
+    final coverIds =
+        coverIdByBill.values.whereType<String>().toSet().toList();
+    final coverDetails = <String, Map<String, dynamic>>{};
+    if (coverIds.isNotEmpty) {
+      final covers = await client
+          .from('table_cover')
+          .select('id, cover_number, label')
+          .inFilter('id', coverIds);
+      for (final c in covers as List) {
+        coverDetails[c['id'] as String] = c as Map<String, dynamic>;
+      }
+    }
+
+    return (itemRows as List<dynamic>).map<Map<String, dynamic>>((raw) {
+      final item = raw as Map<String, dynamic>;
+      final billId = item['bill_id'] as String?;
+      final coverId = billId != null ? coverIdByBill[billId] : null;
+      final cover = coverId != null ? coverDetails[coverId] : null;
+      return {
+        'item_name': (item['item_name_snapshot'] as String?) ?? '—',
+        'qty': (item['qty'] as num?)?.toInt() ?? 1,
+        'rate': (item['rate_snapshot'] as num?)?.toDouble() ?? 0.0,
+        'cover_id': coverId,
+        'cover_number': cover?['cover_number'] as int?,
+        'cover_label': cover?['label'] as String?,
+      };
+    }).toList();
+  }
+
   static Future<Map<String, dynamic>> createCover({
     required String sessionId,
     required String companyId,

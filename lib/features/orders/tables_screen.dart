@@ -10,7 +10,6 @@ import '../../models/models.dart';
 import '../../providers/providers.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import '../../core/services/local_parser_service.dart';
-import 'cover_selection_dialog.dart';
 
 /// Tables management screen
 class TablesScreen extends ConsumerStatefulWidget {
@@ -26,6 +25,14 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   String? _selectedCategory;
   String? _selectedCoverId;
   String? _selectedCoverLabel;
+
+  // Table overview state (shown when occupied table is tapped)
+  bool _showTableOverview = false;
+  bool _overviewLoading = false;
+  bool _overviewSaving = false;
+  List<TableCover> _overviewCovers = [];
+  Map<String, double> _overviewCoverTotals = {};
+  List<Map<String, dynamic>> _overviewItems = [];
 
   // Voice AI State
   final SpeechToText _speechToText = SpeechToText();
@@ -282,7 +289,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 
             // Quick Order Side Panel
             if (_selectedTable != null)
-              _buildQuickOrderPanel(size, isDark, isTablet, user),
+              _showTableOverview
+                  ? _buildTableOverviewPanel(size, isDark, isTablet, user)
+                  : _buildQuickOrderPanel(size, isDark, isTablet, user),
           ],
         ),
       ),
@@ -291,32 +300,23 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 
   Future<void> _handleTableTap(CafeTable table) async {
     if (table.isOccupied && table.activeSessionId != null) {
-      final user = ref.read(authStateProvider).value;
-      final result = await showCoverSelectionDialog(
-        context: context,
-        ref: ref,
-        table: table,
-        companyId: widget.companyId,
-        userId: user?.id ?? '',
-      );
-      if (result != null && mounted) {
-        setState(() {
-          _selectedTable = table;
-          _selectedCoverId = result.cover.id;
-          
-          _selectedCoverLabel = result.cover.displayName;
-          _isAddingMoreItems = true;
-          _selectedCategory = null;
-          _showCartTab = false;
-          _searchQuery = '';
-          _searchController.clear();
-        });
-      }
+      setState(() {
+        _selectedTable = table;
+        _showTableOverview = true;
+        _selectedCoverId = null;
+        _selectedCoverLabel = null;
+        _isAddingMoreItems = false;
+        _overviewCovers = [];
+        _overviewItems = [];
+        _overviewCoverTotals = {};
+      });
+      _loadTableOverview(table.activeSessionId!);
     } else {
       setState(() {
         _selectedTable = table;
         _selectedCoverId = null;
         _selectedCoverLabel = null;
+        _showTableOverview = false;
         _isAddingMoreItems = false;
         _selectedCategory = null;
         _showCartTab = false;
@@ -327,6 +327,131 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       });
       _refreshOrderSummary();
     }
+  }
+
+  Future<void> _loadTableOverview(String sessionId) async {
+    setState(() => _overviewLoading = true);
+    try {
+      final results = await Future.wait([
+        SupabaseService.getCoversForSession(sessionId),
+        SupabaseService.getCoverTotals(sessionId),
+        SupabaseService.getDetailedItemsForSession(sessionId),
+      ]);
+      if (mounted) {
+        setState(() {
+          _overviewCovers =
+              (results[0] as List<Map<String, dynamic>>)
+                  .map((e) => TableCover.fromJson(e))
+                  .toList();
+          _overviewCoverTotals = results[1] as Map<String, double>;
+          _overviewItems = results[2] as List<Map<String, dynamic>>;
+          _overviewLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _overviewLoading = false);
+    }
+  }
+
+  void _startOrderForCover(TableCover cover) {
+    setState(() {
+      _showTableOverview = false;
+      _selectedCoverId = cover.id;
+      _selectedCoverLabel = cover.displayName;
+      _isAddingMoreItems = true;
+      _selectedCategory = null;
+      _showCartTab = false;
+      _searchQuery = '';
+      _searchController.clear();
+    });
+  }
+
+  Future<void> _billCoverFromOverview(TableCover cover) async {
+    final total = _overviewCoverTotals[cover.id] ?? 0;
+    final sessionId = _selectedTable?.activeSessionId;
+    if (total == 0 || sessionId == null) return;
+
+    final mode = await showDialog<String>(
+      context: context,
+      builder: (_) =>
+          _CoverPaymentSheet(total: total, coverName: cover.displayName),
+    );
+    if (mode == null || !mounted) return;
+
+    setState(() => _overviewSaving = true);
+    try {
+      await SupabaseService.checkoutCover(
+        coverId: cover.id,
+        sessionId: sessionId,
+        paymentMode: mode,
+      );
+      ref.invalidate(tablesProvider(widget.companyId));
+      if (mounted) {
+        AppFeedback.success(
+          context,
+          '${cover.displayName} paid — ₹${total.toStringAsFixed(0)}',
+        );
+        // Refresh or close if all covers billed
+        final freshTables = ref.read(tablesProvider(widget.companyId)).value;
+        final updatedTable = freshTables?.firstWhere(
+          (t) => t.id == _selectedTable?.id,
+          orElse: () => _selectedTable!,
+        );
+        if (updatedTable?.isOccupied == true) {
+          await _loadTableOverview(sessionId);
+        } else {
+          setState(() {
+            _selectedTable = null;
+            _showTableOverview = false;
+            _overviewCovers = [];
+            _overviewItems = [];
+            _overviewCoverTotals = {};
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) AppFeedback.error(context, e);
+    } finally {
+      if (mounted) setState(() => _overviewSaving = false);
+    }
+  }
+
+  Future<void> _addCoverFromOverview(UserProfile user) async {
+    final sessionId = _selectedTable?.activeSessionId;
+    if (sessionId == null) return;
+    setState(() => _overviewSaving = true);
+    try {
+      final nextNumber = _overviewCovers.isEmpty
+          ? 1
+          : _overviewCovers
+                  .map((c) => c.coverNumber)
+                  .reduce((a, b) => a > b ? a : b) +
+              1;
+      final data = await SupabaseService.createCover(
+        sessionId: sessionId,
+        companyId: widget.companyId,
+        coverNumber: nextNumber,
+      );
+      if (mounted) _startOrderForCover(TableCover.fromJson(data));
+    } catch (e) {
+      if (mounted) AppFeedback.error(context, e);
+    } finally {
+      if (mounted) setState(() => _overviewSaving = false);
+    }
+  }
+
+  // ── Cover color palette ─────────────────────────────────────
+  static const _kCoverColors = [
+    Color(0xFFF97316), // orange  (C1)
+    Color(0xFF3B82F6), // blue    (C2)
+    Color(0xFF8B5CF6), // purple  (C3)
+    Color(0xFF10B981), // teal    (C4)
+    Color(0xFFEC4899), // pink    (C5)
+    Color(0xFFEAB308), // yellow  (C6)
+  ];
+  Color _coverAccent(int? coverNumber) {
+    if (coverNumber == null) return Colors.grey;
+    return _kCoverColors[(coverNumber - 1) % _kCoverColors.length];
   }
 
   void _refreshOrderSummary() {
@@ -531,20 +656,46 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                   ),
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.close_rounded),
+                                  icon: Icon(
+                                    _selectedCoverId != null
+                                        ? Icons.arrow_back_rounded
+                                        : Icons.close_rounded,
+                                  ),
                                   iconSize: isMobile ? 20 : 24,
                                   onPressed: () {
-                                    setState(() {
-                                      _selectedTable = null;
-                                      _selectedCoverId = null;
-                                      _selectedCoverLabel = null;
-                                      _selectedCategory = null;
-                                      _showCartTab = false;
-                                      _searchQuery = '';
-                                      _searchController.clear();
-                                      _orderSummaryTableId = null;
-                                      _orderSummaryFuture = null;
-                                    });
+                                    if (_selectedCoverId != null) {
+                                      // Go back to table overview
+                                      final sid =
+                                          _selectedTable?.activeSessionId;
+                                      setState(() {
+                                        _showTableOverview = true;
+                                        _isAddingMoreItems = false;
+                                        _selectedCoverId = null;
+                                        _selectedCoverLabel = null;
+                                        _selectedCategory = null;
+                                        _showCartTab = false;
+                                        _searchQuery = '';
+                                        _searchController.clear();
+                                        _overviewCovers = [];
+                                        _overviewItems = [];
+                                        _overviewCoverTotals = {};
+                                      });
+                                      if (sid != null) {
+                                        _loadTableOverview(sid);
+                                      }
+                                    } else {
+                                      setState(() {
+                                        _selectedTable = null;
+                                        _selectedCoverId = null;
+                                        _selectedCoverLabel = null;
+                                        _selectedCategory = null;
+                                        _showCartTab = false;
+                                        _searchQuery = '';
+                                        _searchController.clear();
+                                        _orderSummaryTableId = null;
+                                        _orderSummaryFuture = null;
+                                      });
+                                    }
                                   },
                                   style: IconButton.styleFrom(
                                     backgroundColor: isDark
@@ -1158,6 +1309,528 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                 duration: 350.ms,
                 curve: Curves.easeOutCubic,
               ),
+    );
+  }
+
+  // ── TABLE OVERVIEW PANEL ────────────────────────────────────
+  Widget _buildTableOverviewPanel(
+    Size size,
+    bool isDark,
+    bool isTablet,
+    UserProfile? user,
+  ) {
+    final bool isMobile = size.width < 600;
+    final double panelWidth =
+        isMobile ? size.width : min(390.0, size.width * 0.46);
+    final double panelHeight =
+        isMobile ? size.height * 0.88 : size.height;
+
+    final activeCovers =
+        _overviewCovers.where((c) => c.isActive).toList();
+    final billedCovers =
+        _overviewCovers.where((c) => c.isBilled).toList();
+    final grandTotal =
+        _overviewCoverTotals.values.fold(0.0, (a, b) => a + b);
+
+    return Positioned(
+      right: 0,
+      bottom: 0,
+      top: isMobile ? null : 0,
+      left: isMobile ? 0 : null,
+      child: Container(
+        width: panelWidth,
+        height: panelHeight,
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25),
+              blurRadius: 30,
+              offset:
+                  isMobile ? const Offset(0, -6) : const Offset(-8, 0),
+            ),
+          ],
+          borderRadius: isMobile
+              ? const BorderRadius.vertical(top: Radius.circular(24))
+              : const BorderRadius.only(
+                  topLeft: Radius.circular(24),
+                  bottomLeft: Radius.circular(24),
+                ),
+        ),
+        child: Column(
+          children: [
+            // Drag handle (mobile)
+            if (isMobile)
+              Padding(
+                padding: const EdgeInsets.only(top: 10, bottom: 4),
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.2)
+                        : Colors.black.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+
+            // Header
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                isMobile ? 4 : 20,
+                8,
+                10,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryOrange.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      Icons.table_restaurant_rounded,
+                      color: isDark
+                          ? AppColors.primaryAmber
+                          : AppColors.primaryOrange,
+                      size: 18,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _selectedTable?.tableName ?? 'Table',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        if (!_overviewLoading)
+                          Text(
+                            '${activeCovers.length} cover${activeCovers.length != 1 ? 's' : ''}'
+                            '${grandTotal > 0 ? '  ·  ₹${grandTotal.toStringAsFixed(0)}' : ''}',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: isDark
+                                  ? AppColors.primaryAmber
+                                  : AppColors.primaryOrange,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                    onPressed: () => setState(() {
+                      _selectedTable = null;
+                      _showTableOverview = false;
+                      _overviewCovers = [];
+                      _overviewItems = [];
+                      _overviewCoverTotals = {};
+                    }),
+                    style: IconButton.styleFrom(
+                      backgroundColor: isDark
+                          ? Colors.white.withValues(alpha: 0.05)
+                          : Colors.black.withValues(alpha: 0.05),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+
+            // Body
+            if (_overviewLoading)
+              const Expanded(
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                  children: [
+                    // ── Ordered items ─────────────────────────
+                    if (_overviewItems.isNotEmpty) ...[
+                      _ovLabel('WHAT\'S ORDERED', isDark),
+                      const SizedBox(height: 8),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.03)
+                              : Colors.black.withValues(alpha: 0.02),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.06)
+                                : Colors.black.withValues(alpha: 0.05),
+                          ),
+                        ),
+                        child: Column(
+                          children: List.generate(
+                            _overviewItems.length,
+                            (i) => Column(
+                              children: [
+                                _buildOvItemRow(
+                                  _overviewItems[i],
+                                  isDark,
+                                ),
+                                if (i < _overviewItems.length - 1)
+                                  Divider(
+                                    height: 1,
+                                    indent: 14,
+                                    endIndent: 14,
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.06)
+                                        : Colors.black.withValues(alpha: 0.05),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ] else ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        alignment: Alignment.center,
+                        child: Text(
+                          'No orders yet on this table',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            color: isDark
+                                ? AppColors.textWhiteMuted
+                                : AppColors.textDarkMuted,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+
+                    // ── Covers ────────────────────────────────
+                    _ovLabel(
+                      'COVERS  (${activeCovers.length} active)',
+                      isDark,
+                    ),
+                    const SizedBox(height: 8),
+                    if (activeCovers.isEmpty && billedCovers.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          'No covers yet — tap "Add Cover" below',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            color: isDark
+                                ? AppColors.textWhiteMuted
+                                : AppColors.textDarkMuted,
+                          ),
+                        ),
+                      )
+                    else ...[
+                      ...activeCovers.map(
+                        (c) => _buildOvCoverCard(c, isDark, false),
+                      ),
+                      if (billedCovers.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _ovLabel('BILLED', isDark),
+                        const SizedBox(height: 6),
+                        ...billedCovers.map(
+                          (c) => _buildOvCoverCard(c, isDark, true),
+                        ),
+                      ],
+                    ],
+                  ],
+                ),
+              ),
+
+            // Footer – Add Cover button
+            if (!_overviewLoading)
+              SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed:
+                          (_overviewSaving || user == null)
+                          ? null
+                          : () => _addCoverFromOverview(user),
+                      icon: _overviewSaving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.person_add_rounded, size: 16),
+                      label: Text(
+                        'Add Cover for Another Customer',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isDark
+                            ? AppColors.primaryAmber
+                            : AppColors.primaryOrange,
+                        foregroundColor: Colors.white,
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 13),
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      )
+          .animate()
+          .slideY(
+            begin: isMobile ? 1.0 : 0.0,
+            end: 0.0,
+            duration: 350.ms,
+            curve: Curves.easeOutCubic,
+          )
+          .slideX(
+            begin: isMobile ? 0.0 : 1.0,
+            end: 0.0,
+            duration: 350.ms,
+            curve: Curves.easeOutCubic,
+          ),
+    );
+  }
+
+  Widget _ovLabel(String text, bool isDark) {
+    return Text(
+      text,
+      style: GoogleFonts.inter(
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
+        letterSpacing: 0.8,
+        color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+      ),
+    );
+  }
+
+  Widget _buildOvItemRow(Map<String, dynamic> item, bool isDark) {
+    final name = item['item_name'] as String? ?? '—';
+    final qty = item['qty'] as int? ?? 1;
+    final rate = item['rate'] as double? ?? 0.0;
+    final coverNumber = item['cover_number'] as int?;
+    final coverLabel = item['cover_label'] as String?;
+    final total = qty * rate;
+    final color = _coverAccent(coverNumber);
+    final badge = (coverLabel != null && coverLabel.isNotEmpty)
+        ? coverLabel
+        : (coverNumber != null ? 'C$coverNumber' : 'Table');
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: color.withValues(alpha: 0.35)),
+            ),
+            child: Text(
+              badge,
+              style: GoogleFonts.inter(
+                fontSize: 9,
+                fontWeight: FontWeight.w800,
+                color: color,
+                letterSpacing: 0.3,
+              ),
+            ),
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              name,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Text(
+            '×$qty',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: isDark
+                  ? AppColors.textWhiteMuted
+                  : AppColors.textDarkMuted,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            '₹${total.toStringAsFixed(0)}',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOvCoverCard(
+    TableCover cover,
+    bool isDark,
+    bool isBilled,
+  ) {
+    final total = _overviewCoverTotals[cover.id] ?? 0;
+    final color = isBilled
+        ? AppColors.success
+        : _coverAccent(cover.coverNumber);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isBilled ? 0.05 : 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: color.withValues(alpha: isBilled ? 0.15 : 0.28),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.18),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: isBilled
+                  ? Icon(Icons.check_rounded, color: color, size: 18)
+                  : Text(
+                      '${cover.coverNumber}',
+                      style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: color,
+                      ),
+                    ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  cover.displayName,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Text(
+                  total > 0
+                      ? '₹${total.toStringAsFixed(0)}'
+                      : 'No orders yet',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: isDark
+                        ? AppColors.textWhiteMuted
+                        : AppColors.textDarkMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (isBilled)
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10,
+                vertical: 4,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Paid',
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.success,
+                ),
+              ),
+            )
+          else ...[
+            TextButton(
+              onPressed:
+                  _overviewSaving
+                  ? null
+                  : () => _startOrderForCover(cover),
+              style: TextButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: Text(
+                'Order',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: isDark
+                      ? AppColors.primaryAmber
+                      : AppColors.primaryOrange,
+                ),
+              ),
+            ),
+            if (total > 0)
+              TextButton(
+                onPressed:
+                    _overviewSaving
+                    ? null
+                    : () => _billCoverFromOverview(cover),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'Bill',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.success,
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -2067,19 +2740,41 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
             ? '$_selectedCoverLabel · ${_selectedTable?.tableName}'
             : _selectedTable?.tableName ?? '';
         AppFeedback.success(context, 'KOT sent to kitchen — $label');
-        setState(() {
-          _selectedTable = null;
-          _selectedCoverId = null;
-          _selectedCoverLabel = null;
-          _selectedCategory = null;
-          _showCartTab = false;
-          _searchQuery = '';
-          _searchController.clear();
-          _isAddingMoreItems = false;
-          _orderSummaryTableId = null;
-          _orderSummaryFuture = null;
-        });
         ref.invalidate(tablesProvider(widget.companyId));
+
+        if (_selectedCoverId != null &&
+            _selectedTable?.activeSessionId != null) {
+          // Return to overview so staff can order for another cover or bill
+          final sid = _selectedTable!.activeSessionId!;
+          setState(() {
+            _showTableOverview = true;
+            _isAddingMoreItems = false;
+            _selectedCoverId = null;
+            _selectedCoverLabel = null;
+            _selectedCategory = null;
+            _showCartTab = false;
+            _searchQuery = '';
+            _searchController.clear();
+            _overviewCovers = [];
+            _overviewItems = [];
+            _overviewCoverTotals = {};
+          });
+          _loadTableOverview(sid);
+        } else {
+          setState(() {
+            _selectedTable = null;
+            _selectedCoverId = null;
+            _selectedCoverLabel = null;
+            _selectedCategory = null;
+            _showCartTab = false;
+            _searchQuery = '';
+            _searchController.clear();
+            _isAddingMoreItems = false;
+            _showTableOverview = false;
+            _orderSummaryTableId = null;
+            _orderSummaryFuture = null;
+          });
+        }
       }
     } catch (e, st) {
       debugPrint('SAVE_ORDER_ERROR: $e\n$st');
@@ -2927,6 +3622,104 @@ class _TableBillingSheetState extends ConsumerState<_TableBillingSheet> {
           ),
         ),
       ),
+    );
+  }
+}
+
+
+// ─── Cover Payment Dialog ───────────────────────────────────────────────────
+class _CoverPaymentSheet extends StatefulWidget {
+  final double total;
+  final String coverName;
+  const _CoverPaymentSheet({required this.total, required this.coverName});
+
+  @override
+  State<_CoverPaymentSheet> createState() => _CoverPaymentSheetState();
+}
+
+class _CoverPaymentSheetState extends State<_CoverPaymentSheet> {
+  String _mode = 'CASH';
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return AlertDialog(
+      backgroundColor:
+          isDark ? AppColors.darkSurface : AppColors.lightSurface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Text(
+        'Bill ${widget.coverName}',
+        style: GoogleFonts.inter(fontWeight: FontWeight.w800),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '₹${widget.total.toStringAsFixed(0)}',
+            style: GoogleFonts.inter(
+              fontSize: 36,
+              fontWeight: FontWeight.w900,
+              color: AppColors.success,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: ['CASH', 'UPI', 'CARD'].map((mode) {
+              final selected = _mode == mode;
+              return Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: GestureDetector(
+                    onTap: () => setState(() => _mode = mode),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? AppColors.primaryOrange
+                            : (isDark
+                                  ? Colors.white.withValues(alpha: 0.07)
+                                  : Colors.black.withValues(alpha: 0.05)),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        mode,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: selected ? Colors.white : null,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            'Cancel',
+            style: GoogleFonts.inter(color: AppColors.error, fontWeight: FontWeight.w600),
+          ),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(context).pop(_mode),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.success,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          ),
+          child: Text(
+            'Confirm',
+            style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+        ),
+      ],
     );
   }
 }
