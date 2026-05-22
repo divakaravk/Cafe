@@ -416,11 +416,16 @@ class CafeTable {
     this.isActive = true,
     this.isOccupied = false,
     this.activeOrderTotal = 0.0,
+    this.activeSessionId,
+    this.activeCoverCount = 0,
   });
 
   String get tableName => tableNumber;
   String get status => isOccupied ? 'OCCUPIED' : 'FREE';
   bool get isFree => !isOccupied;
+
+  final String? activeSessionId;
+  final int activeCoverCount;
 
   factory CafeTable.fromJson(Map<String, dynamic> json) => CafeTable(
     id: json['id'] as String,
@@ -431,6 +436,8 @@ class CafeTable {
     isActive: json['is_active'] as bool? ?? true,
     isOccupied: json['is_occupied'] as bool? ?? false,
     activeOrderTotal: (json['active_order_total'] as num?)?.toDouble() ?? 0.0,
+    activeSessionId: json['active_session_id'] as String?,
+    activeCoverCount: json['active_cover_count'] as int? ?? 0,
   );
 }
 
@@ -636,6 +643,8 @@ class KotMaster {
   final String billId;
   final String? tableSessionId;
   final String? tableName;
+  final String? coverId;
+  final int? coverNumber;
   final String kotNumber;
   String status;
   final String createdBy;
@@ -649,6 +658,8 @@ class KotMaster {
     required this.billId,
     this.tableSessionId,
     this.tableName,
+    this.coverId,
+    this.coverNumber,
     required this.kotNumber,
     this.status = KotStatus.pending,
     required this.createdBy,
@@ -669,6 +680,10 @@ class KotMaster {
     tableName: json['table_session'] != null &&
             json['table_session']['table_master'] != null
         ? json['table_session']['table_master']['table_number'] as String?
+        : null,
+    coverId: json['cover_id'] as String?,
+    coverNumber: json['table_cover'] != null
+        ? json['table_cover']['cover_number'] as int?
         : null,
     kotNumber: json['kot_number'] as String? ?? '',
     status: json['status'] as String? ?? KotStatus.pending,
@@ -714,6 +729,57 @@ class KotItem {
     notes: json['notes'] as String?,
     status: json['status'] as String? ?? KotItemStatus.pending,
   );
+}
+
+/// Represents one customer group at a table (a "cover")
+class TableCover {
+  final String id;
+  final String tableSessionId;
+  final String companyId;
+  final int coverNumber;
+  final String? label;
+  final int pax;
+  final String status; // 'active' | 'billed' | 'merged'
+  final DateTime? createdAt;
+
+  TableCover({
+    required this.id,
+    required this.tableSessionId,
+    required this.companyId,
+    required this.coverNumber,
+    this.label,
+    this.pax = 1,
+    this.status = 'active',
+    this.createdAt,
+  });
+
+  String get displayName =>
+      (label != null && label!.isNotEmpty) ? label! : 'Cover $coverNumber';
+  bool get isActive => status == 'active';
+  bool get isBilled => status == 'billed';
+
+  factory TableCover.fromJson(Map<String, dynamic> json) => TableCover(
+    id: json['id'] as String,
+    tableSessionId: json['table_session_id'] as String,
+    companyId: json['company_id'] as String,
+    coverNumber: json['cover_number'] as int,
+    label: json['label'] as String?,
+    pax: json['pax'] as int? ?? 1,
+    status: json['status'] as String? ?? 'active',
+    createdAt: json['created_at'] != null
+        ? DateTime.parse(json['created_at'] as String)
+        : null,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'table_session_id': tableSessionId,
+    'company_id': companyId,
+    'cover_number': coverNumber,
+    'label': label,
+    'pax': pax,
+    'status': status,
+  };
 }
 
 /// Cart item for the POS (local state before billing)

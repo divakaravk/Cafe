@@ -10,6 +10,7 @@ import '../../models/models.dart';
 import '../../providers/providers.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import '../../core/services/local_parser_service.dart';
+import 'cover_selection_dialog.dart';
 
 /// Tables management screen
 class TablesScreen extends ConsumerStatefulWidget {
@@ -23,6 +24,8 @@ class TablesScreen extends ConsumerStatefulWidget {
 class _TablesScreenState extends ConsumerState<TablesScreen> {
   CafeTable? _selectedTable;
   String? _selectedCategory;
+  String? _selectedCoverId;
+  String? _selectedCoverLabel;
 
   // Voice AI State
   final SpeechToText _speechToText = SpeechToText();
@@ -255,19 +258,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                 table: table,
                                 isDark: isDark,
                                 isSelected: isSelected,
-                                onTap: () {
-                                  setState(() {
-                                    _selectedTable = table;
-                                    _isAddingMoreItems = false;
-                                    _selectedCategory = null;
-                                    _showCartTab = false;
-                                    _searchQuery = '';
-                                    _searchController.clear();
-                                    _checkoutDiscount = 0;
-                                    _checkoutPaymentMode = 'CASH';
-                                  });
-                                  _refreshOrderSummary();
-                                },
+                                onTap: () => _handleTableTap(table),
                               )
                               .animate()
                               .fadeIn(
@@ -296,6 +287,46 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _handleTableTap(CafeTable table) async {
+    if (table.isOccupied && table.activeSessionId != null) {
+      final user = ref.read(authStateProvider).value;
+      final result = await showCoverSelectionDialog(
+        context: context,
+        ref: ref,
+        table: table,
+        companyId: widget.companyId,
+        userId: user?.id ?? '',
+      );
+      if (result != null && mounted) {
+        setState(() {
+          _selectedTable = table;
+          _selectedCoverId = result.cover.id;
+          
+          _selectedCoverLabel = result.cover.displayName;
+          _isAddingMoreItems = true;
+          _selectedCategory = null;
+          _showCartTab = false;
+          _searchQuery = '';
+          _searchController.clear();
+        });
+      }
+    } else {
+      setState(() {
+        _selectedTable = table;
+        _selectedCoverId = null;
+        _selectedCoverLabel = null;
+        _isAddingMoreItems = false;
+        _selectedCategory = null;
+        _showCartTab = false;
+        _searchQuery = '';
+        _searchController.clear();
+        _checkoutDiscount = 0;
+        _checkoutPaymentMode = 'CASH';
+      });
+      _refreshOrderSummary();
+    }
   }
 
   void _refreshOrderSummary() {
@@ -452,7 +483,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      'Quick Order',
+                                      _selectedCoverLabel ?? 'Quick Order',
                                       style: GoogleFonts.inter(
                                         fontSize: isMobile ? 14 : 16,
                                         fontWeight: FontWeight.w800,
@@ -505,6 +536,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                   onPressed: () {
                                     setState(() {
                                       _selectedTable = null;
+                                      _selectedCoverId = null;
+                                      _selectedCoverLabel = null;
                                       _selectedCategory = null;
                                       _showCartTab = false;
                                       _searchQuery = '';
@@ -1997,8 +2030,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
         ref.invalidate(tablesProvider(widget.companyId));
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         AppFeedback.error(context, e, onRetry: () => _doCheckout(finalTotal));
+      }
     } finally {
       if (mounted) setState(() => _isProcessingAI = false);
     }
@@ -2021,6 +2055,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
           tableId: _selectedTable!.id,
           openedBy: user.id,
           cart: cart,
+          coverId: _selectedCoverId,
         ),
         timeout: const Duration(seconds: 25),
       );
@@ -2028,12 +2063,14 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       ref.read(cartProvider(_selectedTable!.id).notifier).clear();
 
       if (mounted) {
-        AppFeedback.success(
-          context,
-          'KOT sent to kitchen — ${_selectedTable?.tableName}',
-        );
+        final label = _selectedCoverLabel != null
+            ? '$_selectedCoverLabel · ${_selectedTable?.tableName}'
+            : _selectedTable?.tableName ?? '';
+        AppFeedback.success(context, 'KOT sent to kitchen — $label');
         setState(() {
           _selectedTable = null;
+          _selectedCoverId = null;
+          _selectedCoverLabel = null;
           _selectedCategory = null;
           _showCartTab = false;
           _searchQuery = '';
@@ -2254,6 +2291,27 @@ class _TableCard extends ConsumerWidget {
                           isDark,
                           isTablet,
                         ),
+                        if (table.isOccupied && table.activeCoverCount > 0) ...[
+                          _buildSeparator(isDark, isTablet),
+                          Container(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: isTablet ? 8 : 5,
+                              vertical: isTablet ? 3 : 1.5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.error.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '${table.activeCoverCount}C',
+                              style: GoogleFonts.inter(
+                                fontSize: isTablet ? 10 : 8,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.error,
+                              ),
+                            ),
+                          ),
+                        ],
                         const Spacer(),
                         Container(
                           padding: EdgeInsets.symmetric(

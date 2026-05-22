@@ -297,21 +297,34 @@ class SupabaseService {
       sessionMap[s['table_id'] as String] = s['id'] as String;
     }
 
-    // Fetch open bill totals for all occupied sessions in one query
+    // Fetch open bill totals + cover counts for all occupied sessions in parallel
     final Map<String, double> sessionTotals = {};
+    final Map<String, int> coverCounts = {};
     if (sessionMap.isNotEmpty) {
-      final bills = await client
-          .from('bill_master')
-          .select('table_session_id, total_amount, subtotal, cgst_amount, sgst_amount')
-          .inFilter('table_session_id', sessionMap.values.toList())
-          .eq('status', 'open');
-      for (final bill in bills as List) {
+      final sessionIds = sessionMap.values.toList();
+      final results = await Future.wait([
+        client
+            .from('bill_master')
+            .select('table_session_id, total_amount, subtotal, cgst_amount, sgst_amount')
+            .inFilter('table_session_id', sessionIds)
+            .eq('status', 'open'),
+        client
+            .from('table_cover')
+            .select('table_session_id')
+            .inFilter('table_session_id', sessionIds)
+            .eq('status', 'active'),
+      ]);
+      for (final bill in results[0] as List) {
         final sid = bill['table_session_id'] as String;
         final total = (bill['total_amount'] as num?)?.toDouble() ??
             ((bill['subtotal'] as num?)?.toDouble() ?? 0.0) +
                 ((bill['cgst_amount'] as num?)?.toDouble() ?? 0.0) +
                 ((bill['sgst_amount'] as num?)?.toDouble() ?? 0.0);
-        sessionTotals[sid] = total;
+        sessionTotals[sid] = (sessionTotals[sid] ?? 0.0) + total;
+      }
+      for (final cover in results[1] as List) {
+        final sid = cover['table_session_id'] as String;
+        coverCounts[sid] = (coverCounts[sid] ?? 0) + 1;
       }
     }
 
@@ -320,9 +333,117 @@ class SupabaseService {
       final tableId = map['id'] as String;
       final sessionId = sessionMap[tableId];
       map['is_occupied'] = sessionId != null;
+      map['active_session_id'] = sessionId;
       map['active_order_total'] = sessionId != null ? (sessionTotals[sessionId] ?? 0.0) : 0.0;
+      map['active_cover_count'] = sessionId != null ? (coverCounts[sessionId] ?? 0) : 0;
       return map;
     }).toList();
+  }
+
+  // ─── TABLE COVERS ──────────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getCoversForSession(
+    String sessionId,
+  ) async {
+    final res = await client
+        .from('table_cover')
+        .select()
+        .eq('table_session_id', sessionId)
+        .order('cover_number');
+    return List<Map<String, dynamic>>.from(res);
+  }
+
+  /// Returns Map<coverId, total> for all open bills under a session
+  static Future<Map<String, double>> getCoverTotals(String sessionId) async {
+    final bills = await client
+        .from('bill_master')
+        .select('cover_id, total_amount, subtotal, cgst_amount, sgst_amount')
+        .eq('table_session_id', sessionId)
+        .eq('status', 'open');
+    final Map<String, double> totals = {};
+    for (final b in bills as List) {
+      final cid = b['cover_id'] as String?;
+      if (cid == null) continue;
+      final total = (b['total_amount'] as num?)?.toDouble() ??
+          ((b['subtotal'] as num?)?.toDouble() ?? 0.0) +
+              ((b['cgst_amount'] as num?)?.toDouble() ?? 0.0) +
+              ((b['sgst_amount'] as num?)?.toDouble() ?? 0.0);
+      totals[cid] = (totals[cid] ?? 0.0) + total;
+    }
+    return totals;
+  }
+
+  static Future<Map<String, dynamic>> createCover({
+    required String sessionId,
+    required String companyId,
+    required int coverNumber,
+    String? label,
+    int pax = 1,
+  }) async {
+    final res = await client
+        .from('table_cover')
+        .insert({
+          'table_session_id': sessionId,
+          'company_id': companyId,
+          'cover_number': coverNumber,
+          'label': label,
+          'pax': pax,
+          'status': 'active',
+        })
+        .select()
+        .single();
+    return res;
+  }
+
+  static Future<void> updateCoverStatus(String coverId, String status) async {
+    await client
+        .from('table_cover')
+        .update({'status': status})
+        .eq('id', coverId);
+  }
+
+  /// Pays a specific cover's bill and closes the session if all covers are done
+  static Future<void> checkoutCover({
+    required String coverId,
+    required String sessionId,
+    String paymentMode = 'cash',
+    double discountPercent = 0,
+  }) async {
+    final bills = await client
+        .from('bill_master')
+        .select('id, total_amount')
+        .eq('cover_id', coverId)
+        .eq('status', 'open')
+        .limit(1);
+    if ((bills as List).isEmpty) throw Exception('No open bill for this cover');
+
+    final billId = bills[0]['id'] as String;
+    final rawTotal = (bills[0]['total_amount'] as num?)?.toDouble() ?? 0.0;
+    final discountAmount = rawTotal * (discountPercent / 100);
+    final finalTotal = rawTotal - discountAmount;
+    final now = DateTime.now();
+
+    await Future.wait([
+      client.from('bill_master').update({
+        'status': 'paid',
+        'payment_mode': paymentMode.toLowerCase(),
+        'discount_amount': discountAmount,
+        'total_amount': finalTotal,
+      }).eq('id', billId),
+      updateCoverStatus(coverId, 'billed'),
+    ]);
+
+    // Close session if no more active covers remain
+    final activeCovers = await client
+        .from('table_cover')
+        .select('id')
+        .eq('table_session_id', sessionId)
+        .eq('status', 'active');
+    if ((activeCovers as List).isEmpty) {
+      await client.from('table_session').update({
+        'status': 'billed',
+        'closed_at': now.toIso8601String(),
+      }).eq('id', sessionId);
+    }
   }
 
   static Future<void> updateTableStatus(String tableId, String status) async {
@@ -646,11 +767,13 @@ class SupabaseService {
   }
 
   /// Creates (or reuses) table_session → open bill_master + bill_items → kot_master + kot_items
+  /// Pass [coverId] to associate the order with a specific customer cover group.
   static Future<void> saveOrderWithKot({
     required String companyId,
     required String tableId,
     required String openedBy,
     required List<dynamic> cart, // List<CartItem>
+    String? coverId,
   }) async {
     // 1. Reuse existing open session, or create a new one
     final existingSessions = await client
@@ -713,13 +836,18 @@ class SupabaseService {
       };
     }).toList();
 
-    // 3. Reuse existing open bill, or create new one
-    final existingBills = await client
+    // 3. Reuse existing open bill (filtered by cover if provided), or create new one
+    var billQuery = client
         .from('bill_master')
         .select('id, subtotal, cgst_amount, sgst_amount, total_amount')
         .eq('table_session_id', sessionId)
-        .eq('status', 'open')
-        .limit(1);
+        .eq('status', 'open');
+    if (coverId != null) {
+      billQuery = billQuery.eq('cover_id', coverId);
+    } else {
+      billQuery = billQuery.filter('cover_id', 'is', null);
+    }
+    final existingBills = await billQuery.limit(1);
 
     String billId;
     if ((existingBills as List).isNotEmpty) {
@@ -742,6 +870,7 @@ class SupabaseService {
             'company_id': companyId,
             'billed_by': openedBy,
             'table_session_id': sessionId,
+            'cover_id': coverId,
             'bill_number': billNumber,
             'bill_type': 'dine_in',
             'subtotal': subtotal,
@@ -777,6 +906,7 @@ class SupabaseService {
           'company_id': companyId,
           'bill_id': billId,
           'table_session_id': sessionId,
+          'cover_id': coverId,
           'kot_number': kotNumber,
           'status': 'pending',
           'created_by': openedBy,
