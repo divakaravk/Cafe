@@ -313,10 +313,31 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // App brand logo
-          Image.asset(
-            'assets/rasabhojan.png',
-            height: 36,
-            fit: BoxFit.contain,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.restaurant_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Rasabhojan',
+                style: GoogleFonts.outfit(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 14),
           // Avatar + name

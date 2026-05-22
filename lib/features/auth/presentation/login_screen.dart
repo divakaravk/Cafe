@@ -51,7 +51,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
 
     setState(() => _isLoading = true);
     try {
-      await ref.read(authStateProvider.notifier).signIn(
+      await ref
+          .read(authStateProvider.notifier)
+          .signIn(
             _emailController.text.trim(),
             _passwordController.text,
             force: force,
@@ -76,8 +78,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                 color: AppColors.warning.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.devices_rounded,
-                  color: AppColors.warning, size: 22),
+              child: const Icon(
+                Icons.devices_rounded,
+                color: AppColors.warning,
+                size: 22,
+              ),
             ),
             const SizedBox(width: 10),
             Text(
@@ -98,29 +103,36 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
           ),
         ),
-        actionsPadding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        actionsPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 12,
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel',
-                style: GoogleFonts.outfit(
-                    color: isDark
-                        ? AppColors.textWhiteMuted
-                        : AppColors.textDarkMuted)),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.outfit(
+                color: isDark
+                    ? AppColors.textWhiteMuted
+                    : AppColors.textDarkMuted,
+              ),
+            ),
           ),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.primaryAmber,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             ),
             icon: const Icon(Icons.login_rounded, size: 16),
-            label: Text('Sign In Anyway',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.w700)),
+            label: Text(
+              'Sign In Anyway',
+              style: GoogleFonts.outfit(fontWeight: FontWeight.w700),
+            ),
             onPressed: () => Navigator.pop(ctx, true),
           ),
         ],
@@ -295,12 +307,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                           duration: 400.ms,
                           curve: Curves.easeOutBack,
                         ),
-                    const SizedBox(height: 24),
-                    Image.asset(
-                      'assets/rasabhojan.png',
-                      height: 72,
-                      fit: BoxFit.contain,
-                    ).animate().fadeIn(delay: 100.ms, duration: 400.ms),
                     const SizedBox(height: 6),
                     Text(
                       'Sign in to your café dashboard',
@@ -766,10 +772,29 @@ class BrandIntroductionPanel extends StatelessWidget {
           // Header Logo Tag
           Row(
             children: [
-              Image.asset(
-                'assets/rasabhojan.png',
-                height: 48,
-                fit: BoxFit.contain,
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AppColors.primaryAmber, AppColors.primaryOrange],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.restaurant_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Rasabhojan',
+                style: GoogleFonts.outfit(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                  color: isDark ? AppColors.textWhite : AppColors.textDark,
+                  letterSpacing: 0.5,
+                ),
               ),
             ],
           ).animate().fadeIn(duration: 400.ms),

@@ -362,10 +362,14 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Image.asset(
-                    'assets/rasabhojan.png',
-                    height: 28,
-                    fit: BoxFit.contain,
+                  Text(
+                    'Rasabhojan',
+                    style: GoogleFonts.outfit(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: isDark ? AppColors.textWhite : AppColors.textDark,
+                      height: 1.15,
+                    ),
                   ),
                   Text(
                     '${user.fullName} • ${user.role}',

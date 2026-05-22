@@ -1,0 +1,240 @@
+
+<style>
+#erd { width: 100%; overflow-x: auto; }
+#erd svg { width: 100% !important; height: auto !important; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 4px; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary); }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+</style>
+<h2 class="sr-only">Entity Relationship Diagram for a Restaurant POS system with 12 tables</h2>
+<div class="legend">
+  <span style="font-size:12px;color:var(--color-text-secondary);font-weight:500;">Table groups:</span>
+  <span class="legend-item"><span class="legend-dot" style="background:#7F77DD"></span>Core business</span>
+  <span class="legend-item"><span class="legend-dot" style="background:#1D9E75"></span>Menu &amp; items</span>
+  <span class="legend-item"><span class="legend-dot" style="background:#D85A30"></span>Billing &amp; orders</span>
+  <span class="legend-item"><span class="legend-dot" style="background:#378ADD"></span>Users &amp; config</span>
+</div>
+<div id="erd"></div>
+<script type="module">
+import mermaid from 'https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs';
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+await document.fonts.ready;
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  fontFamily: '"Anthropic Sans", sans-serif',
+  themeVariables: {
+    darkMode: dark,
+    fontSize: '13px',
+    fontFamily: '"Anthropic Sans", sans-serif',
+    lineColor: dark ? '#9c9a92' : '#73726c',
+    textColor: dark ? '#c2c0b6' : '#3d3d3a',
+    primaryColor: dark ? '#3C3489' : '#EEEDFE',
+    primaryTextColor: dark ? '#CECBF6' : '#3C3489',
+    primaryBorderColor: dark ? '#7F77DD' : '#534AB7',
+    secondaryColor: dark ? '#085041' : '#E1F5EE',
+    tertiaryColor: dark ? '#3d3d3a' : '#F1EFE8',
+  },
+});
+
+const diagram = `erDiagram
+  company_master ||--o{ user_profiles : "employs"
+  company_master ||--o{ item_master : "owns"
+  company_master ||--o{ table_master : "has"
+  company_master ||--o{ company_hsn : "defines"
+  company_master ||--|| company_print_config : "configures"
+  company_master ||--o{ bill_master : "generates"
+  company_master ||--o{ kot_master : "manages"
+  company_master ||--o{ table_session : "tracks"
+
+  user_profiles ||--|| user_permission : "has"
+  user_profiles ||--|| user_preference : "sets"
+  user_profiles ||--o{ bill_master : "creates"
+  user_profiles ||--o{ table_session : "opens"
+  user_profiles ||--o{ kot_master : "fires"
+
+  table_master ||--o{ table_session : "hosts"
+  table_session ||--o{ bill_master : "generates"
+  table_session ||--o{ kot_master : "groups"
+
+  bill_master ||--o{ bill_item : "contains"
+  bill_master ||--o{ kot_master : "has"
+
+  item_master ||--o{ bill_item : "referenced in"
+  item_master ||--o{ item_variant : "has"
+  company_hsn ||--o{ item_master : "classifies"
+  company_hsn ||--o{ item_variant : "classifies"
+
+  item_variant ||--o{ bill_item : "selected in"
+
+  kot_master ||--o{ kot_item : "lists"
+  bill_item ||--o{ kot_item : "tracked by"
+
+  company_master {
+    uuid id PK
+    text company_code UK
+    text company_name
+    boolean has_gst
+    text gstin
+    boolean has_table_management
+    boolean has_item_variants
+    text currency_code
+  }
+  user_profiles {
+    uuid id PK
+    uuid company_id FK
+    text employee_code UK
+    text user_name
+    text username UK
+    text user_role
+    boolean user_active
+    boolean is_login
+  }
+  user_permission {
+    uuid id PK
+    uuid user_id FK
+    boolean can_create_bill
+    boolean can_edit_bill
+    boolean can_cancel_bill
+    boolean can_apply_discount
+    boolean can_manage_items
+    boolean can_view_reports
+    boolean can_manage_users
+  }
+  user_preference {
+    uuid id PK
+    uuid user_id FK
+    text ui_theme_type
+    text primary_color
+    boolean dark_mode
+    text layout_mode
+  }
+  company_print_config {
+    uuid id PK
+    uuid company_id FK
+    text printer_type
+    boolean print_logo
+    boolean print_gstin
+    boolean auto_print_kot
+    integer copies_bill
+    integer copies_kot
+  }
+  company_hsn {
+    uuid id PK
+    uuid company_id FK
+    text hsn_code
+    numeric gst_rate
+    numeric cgst_rate
+    numeric sgst_rate
+    boolean is_active
+  }
+  item_master {
+    uuid id PK
+    uuid company_id FK
+    uuid hsn_id FK
+    text item_code UK
+    text item_name
+    numeric base_rate
+    boolean has_variants
+    boolean is_taxable
+    text food_type
+  }
+  item_variant {
+    uuid id PK
+    uuid item_id FK
+    uuid hsn_id FK
+    text variant_name
+    numeric base_rate
+    numeric rate_override
+    boolean is_available
+    boolean is_rate_inclusive
+  }
+  table_master {
+    uuid id PK
+    uuid company_id FK
+    text table_number
+    text section
+    integer seating_capacity
+    boolean is_active
+  }
+  table_session {
+    uuid id PK
+    uuid table_id FK
+    uuid company_id FK
+    uuid opened_by FK
+    text status
+    integer covers
+    timestamp opened_at
+    timestamp closed_at
+  }
+  bill_master {
+    uuid id PK
+    uuid company_id FK
+    uuid table_session_id FK
+    uuid billed_by FK
+    text bill_number UK
+    text bill_type
+    text payment_mode
+    text status
+    numeric total_amount
+    numeric amount_paid
+  }
+  bill_item {
+    uuid id PK
+    uuid bill_id FK
+    uuid item_id FK
+    uuid variant_id FK
+    text item_name_snapshot
+    numeric rate_snapshot
+    numeric qty
+    numeric gst_rate_snapshot
+    numeric net_amount
+    text kot_status
+  }
+  kot_master {
+    uuid id PK
+    uuid bill_id FK
+    uuid company_id FK
+    uuid table_session_id FK
+    uuid created_by FK
+    text kot_number
+    text status
+    boolean is_printed
+  }
+  kot_item {
+    uuid id PK
+    uuid kot_id FK
+    uuid bill_item_id FK
+    numeric qty
+    text status
+    text notes
+  }
+`;
+
+const { svg } = await mermaid.render('erd-svg', diagram);
+document.getElementById('erd').innerHTML = svg;
+
+document.querySelectorAll('#erd svg.erDiagram .node').forEach(node => {
+  const firstPath = node.querySelector('path[d]');
+  if (!firstPath) return;
+  const d = firstPath.getAttribute('d');
+  const nums = d.match(/-?[\d.]+/g)?.map(Number);
+  if (!nums || nums.length < 8) return;
+  const xs = [nums[0], nums[2], nums[4], nums[6]];
+  const ys = [nums[1], nums[3], nums[5], nums[7]];
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('rx', '8');
+  for (const a of ['fill', 'stroke', 'stroke-width', 'class', 'style']) {
+    if (firstPath.hasAttribute(a)) rect.setAttribute(a, firstPath.getAttribute(a));
+  }
+  firstPath.replaceWith(rect);
+});
+
+document.querySelectorAll('#erd svg.erDiagram .row-rect-odd path, #erd svg.erDiagram .row-rect-even path').forEach(p => {
+  p.setAttribute('stroke', 'none');
+});
+</script>
