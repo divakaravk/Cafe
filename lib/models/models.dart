@@ -531,6 +531,8 @@ class Bill {
   final String paymentMode;
   final bool isVoided;
   final String? tableName;
+  final int? coverNumber;
+  final String? coverLabel;
   final List<BillItem> items;
   final DateTime? createdAt;
 
@@ -540,6 +542,8 @@ class Bill {
     this.orderId,
     this.billNumber,
     this.tableName,
+    this.coverNumber,
+    this.coverLabel,
     required this.subtotal,
     this.taxAmount = 0,
     this.discountAmount = 0,
@@ -549,6 +553,12 @@ class Bill {
     this.items = const [],
     this.createdAt,
   });
+
+  String get coverDisplayName {
+    if (coverNumber == null) return '';
+    if (coverLabel != null && coverLabel!.isNotEmpty) return coverLabel!;
+    return 'Cover $coverNumber';
+  }
 
   factory Bill.fromJson(Map<String, dynamic> json) => Bill(
     id: json['id'] as String,
@@ -566,6 +576,12 @@ class Bill {
             ? json['table_session']['table_master']['table_number']
                 ?.toString()
             : null,
+    coverNumber: json['table_cover'] != null
+        ? json['table_cover']['cover_number'] as int?
+        : null,
+    coverLabel: json['table_cover'] != null
+        ? json['table_cover']['label'] as String?
+        : null,
     isVoided: json['is_voided'] as bool? ?? false,
     items:
         (json['bill_item'] as List<dynamic>?)

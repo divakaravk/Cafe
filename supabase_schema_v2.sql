@@ -249,4 +249,33 @@ CREATE POLICY company_isolation ON "COMPANY_MASTER" USING (id = (auth.jwt() ->> 
 ALTER TABLE "ITEM_MASTER" ENABLE ROW LEVEL SECURITY;
 CREATE POLICY item_isolation ON "ITEM_MASTER" USING (company_id = (auth.jwt() ->> 'company_id')::UUID);
 
+-- TABLE_COVER (added after v2 initial schema — run separately if table already exists)
+-- CREATE TABLE table_cover (
+--   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+--   table_session_id UUID REFERENCES "TABLE_SESSION"(id) ON DELETE CASCADE,
+--   company_id UUID REFERENCES "COMPANY_MASTER"(id) ON DELETE CASCADE,
+--   cover_number INTEGER NOT NULL,
+--   label TEXT,
+--   pax INTEGER DEFAULT 1,
+--   status TEXT DEFAULT 'active' CHECK (status IN ('active', 'billed')),
+--   created_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+-- );
+
+-- ============================================================
+-- FIX: table_cover permissions (run in Supabase SQL Editor)
+-- ============================================================
+-- Grants for the authenticated role (required when table is created via SQL)
+GRANT SELECT, INSERT, UPDATE, DELETE ON table_cover TO authenticated;
+GRANT SELECT ON table_cover TO anon;
+
+-- Enable RLS
+ALTER TABLE table_cover ENABLE ROW LEVEL SECURITY;
+
+-- Single permissive policy: any authenticated user whose JWT company_id matches
+CREATE POLICY "table_cover_company_isolation" ON table_cover
+  FOR ALL
+  TO authenticated
+  USING (company_id = (auth.jwt() ->> 'company_id')::UUID)
+  WITH CHECK (company_id = (auth.jwt() ->> 'company_id')::UUID);
+
 -- (Extend to all other tables as needed)

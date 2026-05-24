@@ -218,6 +218,32 @@ class ReportState {
     }
     return sales;
   }
+
+  /// Per-cover aggregated entries, sorted by revenue descending.
+  /// Each entry: tableLabel, coverDisplayName, coverNumber (for color), total, billCount.
+  List<Map<String, dynamic>> get coverEntries {
+    final Map<String, Map<String, dynamic>> acc = {};
+    for (final bill in bills) {
+      if (bill.coverNumber == null) continue;
+      final tableLabel =
+          bill.tableName != null ? 'Table ${bill.tableName}' : 'Takeaway';
+      final coverName = bill.coverDisplayName;
+      final key = '${bill.tableName ?? 'takeaway'}_${bill.coverNumber}';
+      acc.putIfAbsent(key, () => {
+        'tableLabel': tableLabel,
+        'coverName': coverName,
+        'coverNumber': bill.coverNumber,
+        'total': 0.0,
+        'billCount': 0,
+      });
+      acc[key]!['total'] = (acc[key]!['total'] as double) + bill.totalAmount;
+      acc[key]!['billCount'] = (acc[key]!['billCount'] as int) + 1;
+    }
+    return acc.values.toList()
+      ..sort(
+        (a, b) => (b['total'] as double).compareTo(a['total'] as double),
+      );
+  }
 }
 
 final reportProvider =

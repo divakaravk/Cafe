@@ -1387,3 +1387,160 @@ class StatInsightCard extends StatelessWidget {
     );
   }
 }
+
+class CoverSalesWidget extends StatelessWidget {
+  final List<Map<String, dynamic>> coverEntries;
+  final double totalRevenue;
+  final bool isDark;
+
+  const CoverSalesWidget({
+    super.key,
+    required this.coverEntries,
+    required this.totalRevenue,
+    required this.isDark,
+  });
+
+  static const _kColors = [
+    Color(0xFFF97316),
+    Color(0xFF3B82F6),
+    Color(0xFF8B5CF6),
+    Color(0xFF10B981),
+    Color(0xFFEC4899),
+    Color(0xFFEAB308),
+  ];
+
+  Color _accentFor(int? coverNumber) {
+    if (coverNumber == null) return Colors.grey;
+    return _kColors[(coverNumber - 1) % _kColors.length];
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (coverEntries.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 24),
+          child: Text(
+            'No cover-wise data for this period',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      children: coverEntries.map((entry) {
+        final tableLabel = entry['tableLabel'] as String;
+        final coverName = entry['coverName'] as String;
+        final coverNum = entry['coverNumber'] as int?;
+        final total = entry['total'] as double;
+        final billCount = entry['billCount'] as int;
+        final share = totalRevenue > 0 ? total / totalRevenue : 0.0;
+        final accent = _accentFor(coverNum);
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: Center(
+                  child: Text(
+                    '${coverNum ?? '?'}',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w900,
+                      color: accent,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '$tableLabel · $coverName',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color:
+                                  isDark ? Colors.white : AppColors.textDark,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '₹${total.toStringAsFixed(0)}',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: accent,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: share.clamp(0.0, 1.0),
+                              minHeight: 5,
+                              backgroundColor: isDark
+                                  ? Colors.white.withValues(alpha: 0.07)
+                                  : Colors.black.withValues(alpha: 0.06),
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(accent),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${(share * 100).toStringAsFixed(1)}%',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? AppColors.textWhiteMuted
+                                : AppColors.textDarkMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$billCount ${billCount == 1 ? 'bill' : 'bills'}',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: isDark
+                            ? AppColors.textWhiteMuted
+                            : AppColors.textDarkMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+}

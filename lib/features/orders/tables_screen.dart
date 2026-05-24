@@ -315,7 +315,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       setState(() {
         _selectedTable = table;
         _selectedCoverId = null;
-        _selectedCoverLabel = null;
+        _selectedCoverLabel = 'Cover 1';
         _showTableOverview = false;
         _isAddingMoreItems = false;
         _selectedCategory = null;
@@ -434,6 +434,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       );
       if (mounted) _startOrderForCover(TableCover.fromJson(data));
     } catch (e) {
+      debugPrint('Error adding cover: $e');
       if (mounted) AppFeedback.error(context, e);
     } finally {
       if (mounted) setState(() => _overviewSaving = false);
@@ -1693,6 +1694,94 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     );
   }
 
+  Future<bool> _confirmAndDeleteCover(TableCover cover) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor:
+              isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: AppColors.error,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Remove Cover?',
+                style: GoogleFonts.inter(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            '${cover.displayName} has no orders and will be permanently removed from this table.',
+            style: GoogleFonts.inter(fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: Text(
+                'Delete',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return false;
+
+    setState(() => _overviewSaving = true);
+    try {
+      await SupabaseService.deleteCover(cover.id);
+      if (mounted) {
+        setState(() {
+          _overviewCovers.removeWhere((c) => c.id == cover.id);
+          _overviewCoverTotals.remove(cover.id);
+          _overviewSaving = false;
+        });
+      }
+      return true;
+    } catch (e) {
+      if (mounted) {
+        AppFeedback.error(context, e);
+        setState(() => _overviewSaving = false);
+      }
+      return false;
+    }
+  }
+
   Widget _buildOvCoverCard(
     TableCover cover,
     bool isDark,
@@ -1702,8 +1791,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     final color = isBilled
         ? AppColors.success
         : _coverAccent(cover.coverNumber);
+    final canDelete = !isBilled && total == 0 && !_overviewSaving;
 
-    return Container(
+    final card = Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
@@ -1750,12 +1840,16 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                 Text(
                   total > 0
                       ? '₹${total.toStringAsFixed(0)}'
-                      : 'No orders yet',
+                      : canDelete
+                          ? 'Swipe left to remove'
+                          : 'No orders yet',
                   style: GoogleFonts.inter(
                     fontSize: 12,
-                    color: isDark
-                        ? AppColors.textWhiteMuted
-                        : AppColors.textDarkMuted,
+                    color: canDelete
+                        ? AppColors.error.withValues(alpha: 0.7)
+                        : isDark
+                            ? AppColors.textWhiteMuted
+                            : AppColors.textDarkMuted,
                   ),
                 ),
               ],
@@ -1831,6 +1925,47 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
           ],
         ],
       ),
+    );
+
+    if (!canDelete) return card;
+
+    return Dismissible(
+      key: ValueKey(cover.id),
+      direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => _confirmAndDeleteCover(cover),
+      onDismissed: (_) {},
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: AppColors.error.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppColors.error.withValues(alpha: 0.3),
+          ),
+        ),
+        alignment: Alignment.centerRight,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            Text(
+              'Delete',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: AppColors.error,
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(
+              Icons.delete_outline_rounded,
+              color: AppColors.error,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+      child: card,
     );
   }
 
@@ -2722,7 +2857,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     setState(() => _isProcessingAI = true);
 
     try {
-      await safeApiCall(
+      final result = await safeApiCall(
         () => SupabaseService.saveOrderWithKot(
           companyId: user.companyId,
           tableId: _selectedTable!.id,
@@ -2736,45 +2871,44 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       ref.read(cartProvider(_selectedTable!.id).notifier).clear();
 
       if (mounted) {
-        final label = _selectedCoverLabel != null
-            ? '$_selectedCoverLabel · ${_selectedTable?.tableName}'
-            : _selectedTable?.tableName ?? '';
+        final label =
+            '${_selectedCoverLabel ?? 'Cover 1'} · ${_selectedTable?.tableName ?? ''}';
         AppFeedback.success(context, 'KOT sent to kitchen — $label');
         ref.invalidate(tablesProvider(widget.companyId));
 
-        if (_selectedCoverId != null &&
-            _selectedTable?.activeSessionId != null) {
-          // Return to overview so staff can order for another cover or bill
-          final sid = _selectedTable!.activeSessionId!;
-          setState(() {
-            _showTableOverview = true;
-            _isAddingMoreItems = false;
-            _selectedCoverId = null;
-            _selectedCoverLabel = null;
-            _selectedCategory = null;
-            _showCartTab = false;
-            _searchQuery = '';
-            _searchController.clear();
-            _overviewCovers = [];
-            _overviewItems = [];
-            _overviewCoverTotals = {};
-          });
-          _loadTableOverview(sid);
-        } else {
-          setState(() {
-            _selectedTable = null;
-            _selectedCoverId = null;
-            _selectedCoverLabel = null;
-            _selectedCategory = null;
-            _showCartTab = false;
-            _searchQuery = '';
-            _searchController.clear();
-            _isAddingMoreItems = false;
-            _showTableOverview = false;
-            _orderSummaryTableId = null;
-            _orderSummaryFuture = null;
-          });
-        }
+        // Always go back to the table overview so staff can add more covers or bill.
+        final sid = result.sessionId;
+        final t = _selectedTable!;
+        setState(() {
+          // Patch the in-memory table with the now-known session id so
+          // billing actions in the overview work before the provider re-fetches.
+          _selectedTable = CafeTable(
+            id: t.id,
+            companyId: t.companyId,
+            tableNumber: t.tableNumber,
+            section: t.section,
+            seatingCapacity: t.seatingCapacity,
+            isActive: t.isActive,
+            isOccupied: true,
+            activeOrderTotal: t.activeOrderTotal,
+            activeSessionId: sid,
+            activeCoverCount: t.activeCoverCount,
+          );
+          _showTableOverview = true;
+          _isAddingMoreItems = false;
+          _selectedCoverId = null;
+          _selectedCoverLabel = null;
+          _selectedCategory = null;
+          _showCartTab = false;
+          _searchQuery = '';
+          _searchController.clear();
+          _overviewCovers = [];
+          _overviewItems = [];
+          _overviewCoverTotals = {};
+          _orderSummaryTableId = null;
+          _orderSummaryFuture = null;
+        });
+        _loadTableOverview(sid);
       }
     } catch (e, st) {
       debugPrint('SAVE_ORDER_ERROR: $e\n$st');

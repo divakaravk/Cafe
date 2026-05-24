@@ -449,6 +449,10 @@ class SupabaseService {
         .eq('id', coverId);
   }
 
+  static Future<void> deleteCover(String coverId) async {
+    await client.from('table_cover').delete().eq('id', coverId);
+  }
+
   /// Pays a specific cover's bill and closes the session if all covers are done
   static Future<void> checkoutCover({
     required String coverId,
@@ -696,7 +700,7 @@ class SupabaseService {
   }) async {
     var query = client
         .from('bill_master')
-        .select('*, bill_item(*), table_session(table_master(table_number))')
+        .select('*, bill_item(*), table_session(table_master(table_number)), table_cover(cover_number, label)')
         .eq('company_id', companyId);
 
     if (startDate != null) {
@@ -814,9 +818,10 @@ class SupabaseService {
     }).eq('id', sessionId);
   }
 
-  /// Creates (or reuses) table_session → open bill_master + bill_items → kot_master + kot_items
-  /// Pass [coverId] to associate the order with a specific customer cover group.
-  static Future<void> saveOrderWithKot({
+  /// Creates (or reuses) table_session → cover → open bill_master + bill_items → kot_master + kot_items.
+  /// If [coverId] is null the order is placed under Cover 1 (created if it doesn't exist yet).
+  /// Returns the session ID and the cover ID actually used.
+  static Future<({String sessionId, String coverId})> saveOrderWithKot({
     required String companyId,
     required String tableId,
     required String openedBy,
@@ -847,6 +852,36 @@ class SupabaseService {
           .select()
           .single();
       sessionId = session['id'] as String;
+    }
+
+    // 1b. Resolve cover — always use an explicit cover so overview works correctly.
+    //     If none supplied, create (or reuse) Cover 1 for this session.
+    String effectiveCoverId;
+    if (coverId != null) {
+      effectiveCoverId = coverId;
+    } else {
+      final existing = await client
+          .from('table_cover')
+          .select('id')
+          .eq('table_session_id', sessionId)
+          .eq('cover_number', 1)
+          .eq('status', 'active')
+          .limit(1);
+      if ((existing as List).isNotEmpty) {
+        effectiveCoverId = existing[0]['id'] as String;
+      } else {
+        final cover = await client
+            .from('table_cover')
+            .insert({
+              'table_session_id': sessionId,
+              'company_id': companyId,
+              'cover_number': 1,
+              'status': 'active',
+            })
+            .select()
+            .single();
+        effectiveCoverId = cover['id'] as String;
+      }
     }
 
     // 2. Calculate taxes and build bill_items payload
@@ -884,18 +919,14 @@ class SupabaseService {
       };
     }).toList();
 
-    // 3. Reuse existing open bill (filtered by cover if provided), or create new one
-    var billQuery = client
+    // 3. Reuse existing open bill for this cover, or create new one
+    final existingBills = await client
         .from('bill_master')
         .select('id, subtotal, cgst_amount, sgst_amount, total_amount')
         .eq('table_session_id', sessionId)
-        .eq('status', 'open');
-    if (coverId != null) {
-      billQuery = billQuery.eq('cover_id', coverId);
-    } else {
-      billQuery = billQuery.filter('cover_id', 'is', null);
-    }
-    final existingBills = await billQuery.limit(1);
+        .eq('cover_id', effectiveCoverId)
+        .eq('status', 'open')
+        .limit(1);
 
     String billId;
     if ((existingBills as List).isNotEmpty) {
@@ -918,7 +949,7 @@ class SupabaseService {
             'company_id': companyId,
             'billed_by': openedBy,
             'table_session_id': sessionId,
-            'cover_id': coverId,
+            'cover_id': effectiveCoverId,
             'bill_number': billNumber,
             'bill_type': 'dine_in',
             'subtotal': subtotal,
@@ -954,7 +985,7 @@ class SupabaseService {
           'company_id': companyId,
           'bill_id': billId,
           'table_session_id': sessionId,
-          'cover_id': coverId,
+          'cover_id': effectiveCoverId,
           'kot_number': kotNumber,
           'status': 'pending',
           'created_by': openedBy,
@@ -980,6 +1011,8 @@ class SupabaseService {
       };
     }).toList();
     await client.from('kot_item').insert(kotItems);
+
+    return (sessionId: sessionId, coverId: effectiveCoverId);
   }
 
   static Future<List<Map<String, dynamic>>> getActiveKots(

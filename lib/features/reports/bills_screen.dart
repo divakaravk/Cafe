@@ -348,6 +348,26 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
             ),
           ),
           const SizedBox(height: 20),
+
+          // Cover sales
+          _buildChartContainer(
+            title: 'Cover-wise Sales',
+            height: reportState.coverEntries.isEmpty
+                ? 120
+                : (reportState.coverEntries.length * 72.0 + 60).clamp(
+                    120,
+                    500,
+                  ),
+            isDark: isDark,
+            child: SingleChildScrollView(
+              child: CoverSalesWidget(
+                coverEntries: reportState.coverEntries,
+                totalRevenue: reportState.totalRevenue,
+                isDark: isDark,
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
         ],
       ),
     );
