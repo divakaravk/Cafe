@@ -424,12 +424,16 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
                 const SizedBox(width: 16),
                 Expanded(
                   child: DropdownButtonFormField<String>(
+                    isExpanded: true,
                     value: _foodType,
                     items: _foodTypes
                         .map(
                           (t) => DropdownMenuItem(
                             value: t,
-                            child: Text(t.toUpperCase()),
+                            child: Text(
+                              t.toUpperCase(),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         )
                         .toList(),

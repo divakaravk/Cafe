@@ -39,6 +39,13 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   // Top bar filter panel
   bool _showFilters = false;
 
+  // Billing state — guards against double-tap and drives button spinner.
+  // A ValueNotifier (not setState) so the panel updates even when it lives in
+  // the modal bottom sheet, which is a separate route from this screen.
+  final ValueNotifier<String?> _processingPayment = ValueNotifier<String?>(
+    null,
+  );
+
   // Voice AI State
   final SpeechToText _speechToText = SpeechToText();
   bool _isListening = false;
@@ -175,6 +182,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   @override
   void dispose() {
     _searchController.dispose();
+    _processingPayment.dispose();
     super.dispose();
   }
 
@@ -1380,33 +1388,42 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                   compact: compact,
                 ),
                 SizedBox(height: compact ? 10 : 14),
-                // Payment buttons
-                Row(
-                  children: [
-                    _paymentButton(
-                      'Cash',
-                      Icons.payments_rounded,
-                      AppColors.success,
-                      compact,
-                      () => _completeBill('CASH', total, cart, user),
-                    ),
-                    SizedBox(width: compact ? 6 : 8),
-                    _paymentButton(
-                      'UPI',
-                      Icons.qr_code_rounded,
-                      AppColors.info,
-                      compact,
-                      () => _completeBill('UPI', total, cart, user),
-                    ),
-                    SizedBox(width: compact ? 6 : 8),
-                    _paymentButton(
-                      'Card',
-                      Icons.credit_card_rounded,
-                      AppColors.warning,
-                      compact,
-                      () => _completeBill('CARD', total, cart, user),
-                    ),
-                  ],
+                // Payment buttons — rebuild on processing changes so the
+                // tapped button shows a spinner and the rest disable.
+                ValueListenableBuilder<String?>(
+                  valueListenable: _processingPayment,
+                  builder: (context, processing, _) {
+                    return Row(
+                      children: [
+                        _paymentButton(
+                          'Cash',
+                          Icons.payments_rounded,
+                          AppColors.success,
+                          compact,
+                          () => _completeBill('CASH', total, cart, user),
+                          loading: processing == 'CASH',
+                        ),
+                        SizedBox(width: compact ? 6 : 8),
+                        _paymentButton(
+                          'UPI',
+                          Icons.qr_code_rounded,
+                          AppColors.info,
+                          compact,
+                          () => _completeBill('UPI', total, cart, user),
+                          loading: processing == 'UPI',
+                        ),
+                        SizedBox(width: compact ? 6 : 8),
+                        _paymentButton(
+                          'Card',
+                          Icons.credit_card_rounded,
+                          AppColors.warning,
+                          compact,
+                          () => _completeBill('CARD', total, cart, user),
+                          loading: processing == 'CARD',
+                        ),
+                      ],
+                    );
+                  },
                 ),
               ],
             ),
@@ -1461,14 +1478,26 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     IconData icon,
     Color color,
     bool compact,
-    VoidCallback onTap,
-  ) {
+    VoidCallback onTap, {
+    bool loading = false,
+  }) {
+    // Only the button being saved greys out; the others stay colored.
+    // Re-entrancy is still blocked by the guard in _completeBill.
     return Expanded(
       child: ElevatedButton.icon(
-        onPressed: onTap,
-        icon: Icon(icon, size: compact ? 14 : 17),
+        onPressed: loading ? null : onTap,
+        icon: loading
+            ? SizedBox(
+                width: compact ? 14 : 17,
+                height: compact ? 14 : 17,
+                child: const CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.white,
+                ),
+              )
+            : Icon(icon, size: compact ? 14 : 17),
         label: Text(
-          label,
+          loading ? 'Saving…' : label,
           style: GoogleFonts.inter(
             fontSize: compact ? 11 : 13,
             fontWeight: FontWeight.w700,
@@ -1492,6 +1521,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     List<CartItem> cart,
     UserProfile user,
   ) async {
+    // Guard against double-tap while a bill is already saving.
+    if (_processingPayment.value != null) return;
+    _processingPayment.value = paymentMode;
+
     final discount = ref.read(discountProvider);
     final subtotal = cart.fold<double>(0, (sum, ci) => sum + ci.total);
     final discountAmount = subtotal * (discount / 100);
@@ -1529,10 +1562,19 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
       ref.read(discountProvider.notifier).reset();
 
       if (mounted) {
-        AppFeedback.success(context, 'Bill created • ₹${total.toStringAsFixed(0)} via $paymentMode');
+        // Close the billing host (modal bottom sheet or end-drawer) so the
+        // panel doesn't linger empty after a successful sale.
+        final navigator = Navigator.of(context);
+        if (navigator.canPop()) navigator.pop();
+        AppFeedback.success(
+          context,
+          'Bill created • ₹${total.toStringAsFixed(0)} via $paymentMode',
+        );
       }
     } catch (e) {
       if (mounted) AppFeedback.error(context, e);
+    } finally {
+      _processingPayment.value = null;
     }
   }
 
