@@ -194,6 +194,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
   }
 
   Future<void> _save() async {
+    if (_isLoading) return; // guard against double-taps
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
 
@@ -363,7 +364,19 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
             : null,
         actions: [
           if (_isEditing)
-            IconButton(icon: const Icon(Icons.check_rounded), onPressed: _save),
+            _isLoading
+                ? const Padding(
+                    padding: EdgeInsets.all(14),
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.check_rounded),
+                    onPressed: _save,
+                  ),
         ],
       ),
       floatingActionButton: _isEditing

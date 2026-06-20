@@ -51,6 +51,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   String _checkoutPaymentMode = 'CASH';
   double _checkoutDiscount = 0;
   bool _isAddingMoreItems = false;
+  // Guards the SAVE KOT action against double-taps and drives its spinner.
+  bool _isSavingOrder = false;
   Future<Map<String, dynamic>?>? _orderSummaryFuture;
   String? _orderSummaryTableId;
 
@@ -543,6 +545,10 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
 
     final allItemsAsync = ref.watch(allItemsProvider(widget.companyId));
     final cartNotifier = ref.read(cartProvider(_selectedTable?.id).notifier);
+    // Honour the company "Show Item Images" toggle in the table order grid.
+    final showImages =
+        ref.watch(companyProvider(widget.companyId)).value?.showItemImages ??
+        true;
 
     final bool isMobile = size.width < 600;
     final double panelWidth = isMobile
@@ -1037,6 +1043,8 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                                             master: master,
                                                             variant: variant,
                                                             isDark: isDark,
+                                                            showImage:
+                                                                showImages,
                                                             cartCount:
                                                                 cartCount,
                                                             onTap: () =>
@@ -1222,23 +1230,43 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                                     BorderRadius.circular(12),
                                               ),
                                             ),
-                                            onPressed: _saveOrder,
+                                            onPressed: _isSavingOrder
+                                                ? null
+                                                : _saveOrder,
                                             child: FittedBox(
                                               fit: BoxFit.scaleDown,
                                               child: Row(
                                                 mainAxisSize: MainAxisSize.min,
                                                 children: [
-                                                  Icon(
-                                                    Icons.receipt_outlined,
-                                                    size: 13,
-                                                    color: isDark
-                                                        ? AppColors.primaryAmber
-                                                        : AppColors
-                                                              .primaryOrange,
-                                                  ),
+                                                  if (_isSavingOrder)
+                                                    SizedBox(
+                                                      width: 13,
+                                                      height: 13,
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            color: isDark
+                                                                ? AppColors
+                                                                      .primaryAmber
+                                                                : AppColors
+                                                                      .primaryOrange,
+                                                          ),
+                                                    )
+                                                  else
+                                                    Icon(
+                                                      Icons.receipt_outlined,
+                                                      size: 13,
+                                                      color: isDark
+                                                          ? AppColors
+                                                                .primaryAmber
+                                                          : AppColors
+                                                                .primaryOrange,
+                                                    ),
                                                   const SizedBox(width: 4),
                                                   Text(
-                                                    'SAVE KOT',
+                                                    _isSavingOrder
+                                                        ? 'SAVING…'
+                                                        : 'SAVE KOT',
                                                     style: TextStyle(
                                                       fontSize: 11,
                                                       fontWeight:
@@ -1277,14 +1305,17 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                               ),
                                               elevation: 0,
                                             ),
-                                            onPressed: () =>
-                                                _showTableBillingSheet(
-                                                  context,
-                                                  ref,
-                                                  _selectedTable!,
-                                                  cart,
-                                                  user!,
-                                                ),
+                                            // Disabled while a KOT save is in
+                                            // flight to avoid concurrent writes.
+                                            onPressed: _isSavingOrder
+                                                ? null
+                                                : () => _showTableBillingSheet(
+                                                    context,
+                                                    ref,
+                                                    _selectedTable!,
+                                                    cart,
+                                                    user!,
+                                                  ),
                                             child: const FittedBox(
                                               fit: BoxFit.scaleDown,
                                               child: Row(
@@ -2000,6 +2031,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     bool isDark,
   ) {
     final isTablet = MediaQuery.of(context).size.width > 800;
+    final showImages =
+        ref.watch(companyProvider(widget.companyId)).value?.showItemImages ??
+        true;
 
     if (cart.isEmpty) {
       return Center(
@@ -2050,28 +2084,30 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
           ),
           child: Row(
             children: [
-              // Item thumbnail
-              Builder(
-                builder: (_) {
-                  final imageUrl = ci.variant?.imageUrl ?? ci.item.imageUrl;
-                  return ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: 44,
-                      height: 44,
-                      child: imageUrl != null && imageUrl.isNotEmpty
-                          ? Image.network(
-                              imageUrl,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) =>
-                                  _cartImagePlaceholder(isDark),
-                            )
-                          : _cartImagePlaceholder(isDark),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(width: 10),
+              // Item thumbnail — hidden when images are disabled.
+              if (showImages) ...[
+                Builder(
+                  builder: (_) {
+                    final imageUrl = ci.variant?.imageUrl ?? ci.item.imageUrl;
+                    return ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: imageUrl != null && imageUrl.isNotEmpty
+                            ? Image.network(
+                                imageUrl,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) =>
+                                    _cartImagePlaceholder(isDark),
+                              )
+                            : _cartImagePlaceholder(isDark),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(width: 10),
+              ],
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2764,15 +2800,26 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                             ),
                                             elevation: 0,
                                           ),
-                                          onPressed: () =>
-                                              _doCheckout(finalTotal),
-                                          child: Text(
-                                            'COMPLETE PAYMENT',
-                                            style: GoogleFonts.inter(
-                                              fontSize: 13,
-                                              fontWeight: FontWeight.w800,
-                                            ),
-                                          ),
+                                          onPressed: _isSavingOrder
+                                              ? null
+                                              : () => _doCheckout(finalTotal),
+                                          child: _isSavingOrder
+                                              ? const SizedBox(
+                                                  width: 18,
+                                                  height: 18,
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                        strokeWidth: 2,
+                                                        color: Colors.white,
+                                                      ),
+                                                )
+                                              : Text(
+                                                  'COMPLETE PAYMENT',
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 13,
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                                ),
                                         ),
                                       ),
                                     ),
@@ -2837,8 +2884,10 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   }
 
   Future<void> _doCheckout(double finalTotal) async {
+    // Re-entrancy guard against double-taps on the pay button.
+    if (_isSavingOrder) return;
     if (_selectedTable == null) return;
-    setState(() => _isProcessingAI = true);
+    setState(() => _isSavingOrder = true);
     try {
       await safeApiCall(
         () => SupabaseService.checkoutTable(
@@ -2867,11 +2916,13 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
         AppFeedback.error(context, e, onRetry: () => _doCheckout(finalTotal));
       }
     } finally {
-      if (mounted) setState(() => _isProcessingAI = false);
+      if (mounted) setState(() => _isSavingOrder = false);
     }
   }
 
   Future<void> _saveOrder() async {
+    // Re-entrancy guard — ignore extra taps while a save is in flight.
+    if (_isSavingOrder) return;
     if (_selectedTable == null) return;
     final cart = ref.read(cartProvider(_selectedTable!.id));
     if (cart.isEmpty) return;
@@ -2879,7 +2930,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     final user = ref.read(authStateProvider).value;
     if (user == null) return;
 
-    setState(() => _isProcessingAI = true);
+    setState(() => _isSavingOrder = true);
 
     try {
       final result = await safeApiCall(
@@ -2939,7 +2990,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
       debugPrint('SAVE_ORDER_ERROR: $e\n$st');
       if (mounted) AppFeedback.error(context, e, onRetry: _saveOrder);
     } finally {
-      if (mounted) setState(() => _isProcessingAI = false);
+      if (mounted) setState(() => _isSavingOrder = false);
     }
   }
 
@@ -3085,6 +3136,7 @@ class _TableCard extends ConsumerWidget {
                           isDark,
                           status == 'OCCUPIED',
                           isTablet,
+                          isFree: status == 'FREE',
                         ),
                         const Spacer(),
                         // Status badge + how long the table has been occupied
@@ -3092,46 +3144,59 @@ class _TableCard extends ConsumerWidget {
                           crossAxisAlignment: CrossAxisAlignment.end,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: isTablet ? 14 : 6,
-                            vertical: isTablet ? 7 : 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: statusBgColor,
-                            borderRadius: BorderRadius.circular(30),
-                            boxShadow: [
-                              BoxShadow(
-                                color: statusColor.withValues(alpha: 0.1),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: isTablet ? 6 : 4,
-                                height: isTablet ? 6 : 4,
+                            () {
+                              final badge = Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: isTablet ? 14 : 6,
+                                  vertical: isTablet ? 7 : 3,
+                                ),
                                 decoration: BoxDecoration(
-                                  color: statusColor,
-                                  shape: BoxShape.circle,
+                                  color: statusBgColor,
+                                  borderRadius: BorderRadius.circular(30),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: statusColor.withValues(alpha: 0.1),
+                                      blurRadius: 8,
+                                      spreadRadius: 1,
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              SizedBox(width: isTablet ? 8 : 4),
-                              Text(
-                                status == 'FREE' ? 'Available' : status,
-                                style: GoogleFonts.inter(
-                                  fontSize: isTablet ? 10 : 8,
-                                  fontWeight: FontWeight.w800,
-                                  color: statusColor,
-                                  letterSpacing: 0.2,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: isTablet ? 6 : 4,
+                                      height: isTablet ? 6 : 4,
+                                      decoration: BoxDecoration(
+                                        color: statusColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    SizedBox(width: isTablet ? 8 : 4),
+                                    Text(
+                                      status == 'FREE' ? 'Available' : status,
+                                      style: GoogleFonts.inter(
+                                        fontSize: isTablet ? 10 : 8,
+                                        fontWeight: FontWeight.w800,
+                                        color: statusColor,
+                                        letterSpacing: 0.2,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                          ),
-                            ),
+                              );
+                              // Free tables: the "Available" badge softly blinks.
+                              if (status != 'FREE') return badge;
+                              return badge
+                                  .animate(
+                                    onPlay: (c) => c.repeat(reverse: true),
+                                  )
+                                  .fadeIn(
+                                    begin: 0.45,
+                                    duration: 900.ms,
+                                    curve: Curves.easeInOut,
+                                  );
+                            }(),
                             if (table.isOccupied &&
                                 table.occupiedSince != null) ...[
                               SizedBox(height: isTablet ? 6 : 4),
@@ -3214,13 +3279,8 @@ class _TableCard extends ConsumerWidget {
       ),
     );
 
-    // Available tables gently blink (pulse + soft fade) to invite seating.
-    if (status == 'FREE') {
-      return card
-          .animate(onPlay: (c) => c.repeat(reverse: true))
-          .fadeIn(begin: 0.6, duration: 900.ms, curve: Curves.easeInOut)
-          .scaleXY(begin: 1.0, end: 1.02, duration: 900.ms, curve: Curves.easeInOut);
-    }
+    // The card itself stays steady; instead the chairs and the "Available"
+    // badge blink (see _buildChair / the status badge) to invite seating.
     return card;
   }
 }
@@ -3289,8 +3349,9 @@ Widget _buildTableIcon(
   CafeTable table,
   bool isDark,
   bool isOccupied,
-  bool isTablet,
-) {
+  bool isTablet, {
+  bool isFree = false,
+}) {
   final capacity = table.seatingCapacity;
 
   return SizedBox(
@@ -3300,7 +3361,13 @@ Widget _buildTableIcon(
       alignment: Alignment.center,
       children: [
         // Dynamic Chairs placement
-        ..._buildDynamicChairs(capacity, isDark, isOccupied, isTablet),
+        ..._buildDynamicChairs(
+          capacity,
+          isDark,
+          isOccupied,
+          isTablet,
+          isFree: isFree,
+        ),
 
         // The Table Surface
         Container(
@@ -3360,8 +3427,9 @@ List<Widget> _buildDynamicChairs(
   int capacity,
   bool isDark,
   bool isOccupied,
-  bool isTablet,
-) {
+  bool isTablet, {
+  bool isFree = false,
+}) {
   final List<Widget> chairs = [];
 
   // Simple distribution logic:
@@ -3369,13 +3437,13 @@ List<Widget> _buildDynamicChairs(
   chairs.add(
     Positioned(
       left: 0,
-      child: _buildChair(isDark, isOccupied, 0, isTablet: isTablet),
+      child: _buildChair(isDark, isOccupied, 0, isTablet: isTablet, isFree: isFree),
     ),
   );
   chairs.add(
     Positioned(
       right: 0,
-      child: _buildChair(isDark, isOccupied, 1, isTablet: isTablet),
+      child: _buildChair(isDark, isOccupied, 1, isTablet: isTablet, isFree: isFree),
     ),
   );
 
@@ -3390,6 +3458,7 @@ List<Widget> _buildDynamicChairs(
           2,
           horizontal: true,
           isTablet: isTablet,
+          isFree: isFree,
         ),
       ),
     );
@@ -3402,6 +3471,7 @@ List<Widget> _buildDynamicChairs(
           3,
           horizontal: true,
           isTablet: isTablet,
+          isFree: isFree,
         ),
       ),
     );
@@ -3414,14 +3484,14 @@ List<Widget> _buildDynamicChairs(
       Positioned(
         left: 0,
         top: isTablet ? 8 : 6,
-        child: _buildChair(isDark, isOccupied, 4, isTablet: isTablet),
+        child: _buildChair(isDark, isOccupied, 4, isTablet: isTablet, isFree: isFree),
       ),
     );
     chairs.add(
       Positioned(
         right: 0,
         bottom: isTablet ? 8 : 6,
-        child: _buildChair(isDark, isOccupied, 5, isTablet: isTablet),
+        child: _buildChair(isDark, isOccupied, 5, isTablet: isTablet, isFree: isFree),
       ),
     );
   }
@@ -3435,24 +3505,51 @@ Widget _buildChair(
   int index, {
   bool horizontal = false,
   required bool isTablet,
+  bool isFree = false,
 }) {
-  return Container(
-        width: horizontal ? (isTablet ? 12 : 8) : (isTablet ? 6 : 4),
-        height: horizontal ? (isTablet ? 6 : 4) : (isTablet ? 12 : 8),
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withValues(alpha: isOccupied ? 0.3 : 0.1)
-              : Colors.black.withValues(alpha: isOccupied ? 0.2 : 0.08),
-          borderRadius: BorderRadius.circular(2),
-          border: Border.all(
-            color: isOccupied
-                ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                      .withValues(alpha: 0.3)
-                : Colors.transparent,
-            width: 0.5,
-          ),
-        ),
-      )
+  // Free chairs get a soft green tint so the blink reads clearly.
+  final Color fillColor = isFree
+      ? AppColors.success.withValues(alpha: 0.25)
+      : (isDark
+            ? Colors.white.withValues(alpha: isOccupied ? 0.3 : 0.1)
+            : Colors.black.withValues(alpha: isOccupied ? 0.2 : 0.08));
+  final Color borderColor = isFree
+      ? AppColors.success.withValues(alpha: 0.5)
+      : (isOccupied
+            ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                  .withValues(alpha: 0.3)
+            : Colors.transparent);
+
+  final chair = Container(
+    width: horizontal ? (isTablet ? 12 : 8) : (isTablet ? 6 : 4),
+    height: horizontal ? (isTablet ? 6 : 4) : (isTablet ? 12 : 8),
+    decoration: BoxDecoration(
+      color: fillColor,
+      borderRadius: BorderRadius.circular(2),
+      border: Border.all(color: borderColor, width: 0.5),
+    ),
+  );
+
+  // Available tables: chairs gently blink (staggered) to invite seating.
+  if (isFree) {
+    return chair
+        .animate(onPlay: (c) => c.repeat(reverse: true))
+        .fadeIn(
+          begin: 0.25,
+          delay: (index * 120).ms,
+          duration: 800.ms,
+          curve: Curves.easeInOut,
+        )
+        .scaleXY(
+          begin: 0.85,
+          end: 1.0,
+          delay: (index * 120).ms,
+          duration: 800.ms,
+          curve: Curves.easeInOut,
+        );
+  }
+
+  return chair
       .animate(
         target: isOccupied ? 1 : 0,
         onPlay: (controller) =>
@@ -3470,6 +3567,7 @@ class _CompactItemTile extends StatelessWidget {
   final Item master;
   final ItemVariant? variant;
   final bool isDark;
+  final bool showImage;
   final int cartCount;
   final VoidCallback onTap;
 
@@ -3477,6 +3575,7 @@ class _CompactItemTile extends StatelessWidget {
     required this.master,
     this.variant,
     required this.isDark,
+    this.showImage = true,
     required this.cartCount,
     required this.onTap,
   });
@@ -3493,6 +3592,12 @@ class _CompactItemTile extends StatelessWidget {
         : variant!.variantName;
     final price = variant?.baseRate ?? master.baseRate;
     final imageUrl = variant?.imageUrl ?? master.imageUrl;
+
+    // Image-free compact tile (company "Show Item Images" is off): just a
+    // food-type marker, name and price.
+    if (!showImage) {
+      return _buildNoImageTile(context, name, price, isMobile, isTablet);
+    }
 
     return Material(
       color: Colors.transparent,
@@ -3606,6 +3711,120 @@ class _CompactItemTile extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildNoImageTile(
+    BuildContext context,
+    String name,
+    double price,
+    bool isMobile,
+    bool isTablet,
+  ) {
+    final accent = isDark ? AppColors.primaryAmber : AppColors.primaryOrange;
+    final inCart = cartCount > 0;
+    final foodType = variant?.foodType ?? master.foodType;
+    Color typeColor = Colors.green;
+    if (foodType == 'egg') typeColor = Colors.amber.shade700;
+    if (foodType == 'non-veg') typeColor = Colors.red;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: EdgeInsets.symmetric(
+            horizontal: isMobile ? 6 : 8,
+            vertical: isMobile ? 6 : 8,
+          ),
+          decoration: BoxDecoration(
+            color: inCart
+                ? accent.withValues(alpha: isDark ? 0.12 : 0.07)
+                : (isDark ? AppColors.darkCard : AppColors.lightCard),
+            borderRadius: BorderRadius.circular(isMobile ? 10 : 12),
+            border: Border.all(
+              color: inCart
+                  ? accent
+                  : (isDark
+                        ? AppColors.darkBorder.withValues(alpha: 0.15)
+                        : AppColors.lightBorder.withValues(alpha: 0.3)),
+              width: inCart ? 1.5 : 1,
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // FSSAI-style veg/non-veg marker
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(3),
+                      border: Border.all(color: typeColor, width: 1.5),
+                    ),
+                    child: Center(
+                      child: Container(
+                        width: 5,
+                        height: 5,
+                        decoration: BoxDecoration(
+                          color: typeColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (inCart)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: accent,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '$cartCount',
+                        style: GoogleFonts.inter(
+                          fontSize: isMobile ? 8 : 10,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const Spacer(),
+              Text(
+                name,
+                style: GoogleFonts.inter(
+                  fontSize: isMobile ? 10 : 12.5,
+                  fontWeight: FontWeight.w700,
+                  height: 1.15,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              SizedBox(height: isMobile ? 3 : 5),
+              Text(
+                '₹${price.toStringAsFixed(0)}',
+                style: GoogleFonts.inter(
+                  fontSize: isMobile ? 10 : 13,
+                  fontWeight: FontWeight.w800,
+                  color: accent,
+                ),
+              ),
+              const Spacer(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _TableBillingSheet extends ConsumerStatefulWidget {
@@ -3628,6 +3847,8 @@ class _TableBillingSheetState extends ConsumerState<_TableBillingSheet> {
   bool _isProcessing = false;
 
   Future<void> _completeTableBill() async {
+    // Re-entrancy guard against double-taps on the pay button.
+    if (_isProcessing) return;
     setState(() => _isProcessing = true);
     final subtotal = widget.cart.fold<double>(0, (sum, ci) => sum + ci.total);
     final discount = ref.read(discountProvider);

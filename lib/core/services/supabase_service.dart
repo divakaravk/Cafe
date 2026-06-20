@@ -353,6 +353,18 @@ class SupabaseService {
     return client.storage.from('items').getPublicUrl(path);
   }
 
+  /// Current time from the database (UTC). Used to anchor elapsed-time displays
+  /// to the server clock so a wrong device/emulator clock can't skew them.
+  static Future<DateTime?> getServerNow() async {
+    try {
+      final res = await client.rpc('server_now');
+      if (res == null) return null;
+      return DateTime.parse(res as String).toUtc();
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ─── TABLES ────────────────────────────────────────────
   static Future<List<Map<String, dynamic>>> getTables(String companyId) async {
     final tables = await client
@@ -377,6 +389,10 @@ class SupabaseService {
         sessionOpenedMap[tid] = s['opened_at'] as String;
       }
     }
+
+    // Server clock, fetched once, so occupancy elapsed-time is anchored to the
+    // database — not the (possibly wrong) device/emulator clock.
+    final serverNow = sessionMap.isNotEmpty ? await getServerNow() : null;
 
     // Fetch open bill totals + cover counts for all occupied sessions in parallel
     final Map<String, double> sessionTotals = {};
@@ -415,7 +431,24 @@ class SupabaseService {
       final sessionId = sessionMap[tableId];
       map['is_occupied'] = sessionId != null;
       map['active_session_id'] = sessionId;
-      map['occupied_since'] = sessionOpenedMap[tableId];
+      // Re-anchor opened_at into the device's clock frame using the measured
+      // server elapsed, so the elapsed chip stays correct even when the device
+      // clock is off. Falls back to the raw timestamp if server time is absent.
+      final openedStr = sessionOpenedMap[tableId];
+      if (openedStr != null && serverNow != null) {
+        final opened = DateTime.tryParse(openedStr)?.toUtc();
+        if (opened != null) {
+          final elapsed = serverNow.difference(opened);
+          map['occupied_since'] = DateTime.now()
+              .toUtc()
+              .subtract(elapsed.isNegative ? Duration.zero : elapsed)
+              .toIso8601String();
+        } else {
+          map['occupied_since'] = openedStr;
+        }
+      } else {
+        map['occupied_since'] = openedStr;
+      }
       map['active_order_total'] = sessionId != null ? (sessionTotals[sessionId] ?? 0.0) : 0.0;
       map['active_cover_count'] = sessionId != null ? (coverCounts[sessionId] ?? 0) : 0;
       return map;

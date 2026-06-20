@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -199,15 +200,16 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
     return Scaffold(
       key: _scaffoldKey,
-      endDrawer: Drawer(
-        width: isTablet ? 400 : size.width * 0.85,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.only(
-            topLeft: Radius.circular(24),
-            bottomLeft: Radius.circular(24),
+      drawer: _buildLeftMenu(isDark, user),
+      endDrawer: Padding(
+        padding: const EdgeInsets.fromLTRB(0, 16, 16, 16),
+        child: Drawer(
+          width: isTablet ? 340 : size.width * 0.80,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
           ),
+          child: _buildBillingPanel(cart, cartNotifier, isDark, user),
         ),
-        child: _buildBillingPanel(cart, cartNotifier, isDark, user),
       ),
       body: Stack(
         children: [
@@ -327,6 +329,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
           // Swiggy Cart Animation Overlay
           if (_showCartAnimation) _buildCartAnimationOverlay(cart, user),
+
+          // Filter Panel Overlay
+          if (_showFilters)
+            Positioned(top: 90, right: 20, child: _buildFilterPanel(isDark)),
         ],
       ),
       // Bottom sheet billing for mobile
@@ -338,43 +344,52 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
   // ─── TOP BAR ────────────────────────────────────────────
   Widget _buildTopBar(bool isDark, UserProfile user) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 16, 8),
-      decoration: BoxDecoration(
-        color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-        border: Border(
-          bottom: BorderSide(
-            color: isDark
-                ? AppColors.darkBorder.withValues(alpha: 0.2)
-                : AppColors.lightBorder.withValues(alpha: 0.3),
-          ),
+    return SafeArea(
+      bottom: false,
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(10, 12, 10, 8),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkSurface : Colors.white,
+          borderRadius: BorderRadius.circular(100),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 16,
+              offset: const Offset(0, 6),
+            ),
+          ],
         ),
-      ),
-      child: SafeArea(
-        bottom: false,
         child: Row(
           children: [
-            IconButton(
-              icon: const Icon(Icons.menu_rounded),
-              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-            ),
-            const SizedBox(width: 8),
+            // Logo / Store indicator
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                   colors: [AppColors.primaryAmber, AppColors.primaryOrange],
                 ),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.primaryOrange.withValues(alpha: 0.3),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: const Icon(
                 Icons.restaurant_rounded,
                 color: Colors.white,
-                size: 22,
+                size: 18,
               ),
             ),
             const SizedBox(width: 12),
-            Flexible(
+
+            // Text Details
+            Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -384,107 +399,78 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                     style: GoogleFonts.outfit(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
-                      color: isDark ? AppColors.textWhite : AppColors.textDark,
+                      color: isDark ? Colors.white : AppColors.textDark,
+                      letterSpacing: -0.5,
                       height: 1.15,
                     ),
-                  ),
-                  Text(
-                    '${user.fullName} • ${user.role}',
-                    style: GoogleFonts.inter(
-                      fontSize: 11,
-                      color: isDark
-                          ? AppColors.textWhiteMuted
-                          : AppColors.textDarkMuted,
-                    ),
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Container(
+                        width: 6,
+                        height: 6,
+                        decoration: const BoxDecoration(
+                          color: AppColors.success,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          '${user.fullName} • ${user.role}',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: isDark
+                                ? AppColors.textWhiteMuted
+                                : AppColors.textDarkMuted,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-            const Spacer(),
-            // Theme switcher
-            SizedBox(
-              width: 36,
-              height: 36,
-              child: IconButton(
-                padding: EdgeInsets.zero,
-                icon: Icon(
-                  ref.watch(isDarkModeProvider)
+            const SizedBox(width: 8),
+
+            // Right actions
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Theme Toggle
+                _buildActionButton(
+                  isDark: isDark,
+                  icon: ref.watch(isDarkModeProvider)
                       ? Icons.light_mode_rounded
                       : Icons.dark_mode_rounded,
-                  size: 20,
+                  onTap: () => ref.read(isDarkModeProvider.notifier).toggle(),
                 ),
-                onPressed: () => ref.read(isDarkModeProvider.notifier).toggle(),
-              ),
-            ),
-            const SizedBox(width: 4),
-            // Group view toggle — always visible in the top bar.
-            _buildToggleChip(
-              icon: Icons.category_rounded,
-              label: 'Group',
-              value: _groupView,
-              isDark: isDark,
-              onTap: () => setState(() => _groupView = !_groupView),
-            ),
-            const SizedBox(width: 6),
-            // Filter toggle button — reveals Voice & Groups chips
-            GestureDetector(
-              onTap: () => setState(() => _showFilters = !_showFilters),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: _showFilters
-                      ? (isDark
-                            ? AppColors.primaryAmber
-                            : AppColors.primaryOrange)
-                      : (isDark
-                            ? Colors.white.withValues(alpha: 0.08)
-                            : Colors.black.withValues(alpha: 0.06)),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: _showFilters
-                        ? (isDark
-                              ? AppColors.primaryAmber
-                              : AppColors.primaryOrange)
-                        : (isDark
-                              ? Colors.white.withValues(alpha: 0.15)
-                              : Colors.black.withValues(alpha: 0.12)),
-                  ),
+                const SizedBox(width: 8),
+
+                // Group Toggle
+                _buildActionButton(
+                  isDark: isDark,
+                  icon: Icons.category_rounded,
+                  isActive: _groupView,
+                  onTap: () => setState(() => _groupView = !_groupView),
                 ),
-                child: Icon(
-                  Icons.tune_rounded,
-                  size: 16,
-                  color: _showFilters
-                      ? Colors.white
-                      : (isDark
-                            ? AppColors.textWhiteMuted
-                            : AppColors.textDarkMuted),
+                const SizedBox(width: 8),
+
+                // Filter Toggle
+                _buildActionButton(
+                  isDark: isDark,
+                  icon: Icons.tune_rounded,
+                  isActive: _showFilters,
+                  onTap: () => setState(() => _showFilters = !_showFilters),
+                  isPrimary: true,
                 ),
-              ),
-            ),
-            // Chips slide in when filter panel is open
-            AnimatedSize(
-              duration: const Duration(milliseconds: 220),
-              curve: Curves.easeInOut,
-              child: _showFilters
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const SizedBox(width: 6),
-                        _buildToggleChip(
-                          icon: Icons.mic_rounded,
-                          label: 'Voice',
-                          value: _isVoiceAIEnabled,
-                          isDark: isDark,
-                          onTap: () => setState(
-                            () => _isVoiceAIEnabled = !_isVoiceAIEnabled,
-                          ),
-                        ),
-                      ],
-                    )
-                  : const SizedBox.shrink(),
+              ],
             ),
           ],
         ),
@@ -492,64 +478,127 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     ).animate().fadeIn(duration: 300.ms);
   }
 
-  // ─── TOGGLE CHIP ────────────────────────────────────────
-  Widget _buildToggleChip({
-    required IconData icon,
-    required String label,
-    required bool value,
+  Widget _buildActionButton({
     required bool isDark,
+    required IconData icon,
     required VoidCallback onTap,
+    bool isActive = false,
+    bool isPrimary = false,
   }) {
-    final active = value;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: active
-              ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-              : (isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : Colors.black.withValues(alpha: 0.06)),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: active
-                ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                : (isDark
-                      ? Colors.white.withValues(alpha: 0.18)
-                      : Colors.black.withValues(alpha: 0.12)),
+    final bgColor = isActive || isPrimary
+        ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+        : (isDark ? AppColors.darkCard : Colors.white);
+
+    final iconColor = isActive || isPrimary
+        ? Colors.white
+        : (isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted);
+
+    final borderColor = isActive || isPrimary
+        ? Colors.transparent
+        : (isDark ? AppColors.darkBorder : Colors.grey.shade300);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: borderColor),
+            boxShadow: isActive || isPrimary
+                ? [
+                    BoxShadow(
+                      color:
+                          (isDark
+                                  ? AppColors.primaryAmber
+                                  : AppColors.primaryOrange)
+                              .withValues(alpha: 0.3),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 13,
-              color: active
-                  ? Colors.white
-                  : (isDark
-                        ? AppColors.textWhiteMuted
-                        : AppColors.textDarkMuted),
-            ),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: active
-                    ? Colors.white
-                    : (isDark
-                          ? AppColors.textWhiteMuted
-                          : AppColors.textDarkMuted),
-              ),
-            ),
-          ],
+          child: Icon(icon, size: 18, color: iconColor),
         ),
       ),
     );
+  }
+
+  Widget _buildFilterPanel(bool isDark) {
+    return Container(
+      width: 220,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? AppColors.darkBorder : Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Quick Actions',
+            style: GoogleFonts.outfit(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white : AppColors.textDark,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Voice AI Toggle
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryOrange.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.mic_rounded,
+                      size: 16,
+                      color: AppColors.primaryOrange,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Voice AI',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : AppColors.textDark,
+                    ),
+                  ),
+                ],
+              ),
+              Switch(
+                value: _isVoiceAIEnabled,
+                onChanged: (val) => setState(() => _isVoiceAIEnabled = val),
+                activeColor: AppColors.primaryOrange,
+              ),
+            ],
+          ),
+        ],
+      ),
+    ).animate().fadeIn(duration: 200.ms).slideY(begin: -0.05, end: 0);
   }
 
   // ─── SIDE TOGGLES ───────────────────────────────────────
@@ -1809,5 +1858,232 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                 ),
       ),
     );
+  }
+
+  // ─── UNIQUE LEFT MENU (GLASS & GLOW) ──────────────────────────────────
+  Widget _buildLeftMenu(bool isDark, UserProfile user) {
+    return Container(
+      width: 280,
+      margin: const EdgeInsets.fromLTRB(16, 24, 0, 24),
+      decoration: BoxDecoration(
+        color: isDark
+            ? AppColors.darkSurface.withValues(alpha: 0.6)
+            : Colors.white.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.08)
+              : Colors.black.withValues(alpha: 0.05),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 30,
+            offset: const Offset(10, 10),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(32),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+          child: Column(
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 32, 20, 24),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [
+                            AppColors.primaryAmber,
+                            AppColors.primaryOrange,
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primaryOrange.withValues(
+                              alpha: 0.4,
+                            ),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.flash_on_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            user.fullName,
+                            style: GoogleFonts.outfit(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: isDark ? Colors.white : AppColors.textDark,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          Text(
+                            user.role,
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              color: isDark
+                                  ? AppColors.textWhiteMuted
+                                  : AppColors.textDarkMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Divider(
+                  height: 1,
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.1)
+                      : Colors.black.withValues(alpha: 0.05),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Menu Items
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  physics: const BouncingScrollPhysics(),
+                  children: [
+                    _buildAnimatedMenuItem(
+                      Icons.dashboard_rounded,
+                      'Dashboard',
+                      0,
+                      isDark,
+                      true,
+                    ),
+                    _buildAnimatedMenuItem(
+                      Icons.receipt_long_rounded,
+                      'Orders',
+                      1,
+                      isDark,
+                      false,
+                    ),
+                    _buildAnimatedMenuItem(
+                      Icons.inventory_2_rounded,
+                      'Inventory',
+                      2,
+                      isDark,
+                      false,
+                    ),
+                    _buildAnimatedMenuItem(
+                      Icons.people_rounded,
+                      'Customers',
+                      3,
+                      isDark,
+                      false,
+                    ),
+                    _buildAnimatedMenuItem(
+                      Icons.bar_chart_rounded,
+                      'Reports',
+                      4,
+                      isDark,
+                      false,
+                    ),
+                    _buildAnimatedMenuItem(
+                      Icons.settings_rounded,
+                      'Settings',
+                      5,
+                      isDark,
+                      false,
+                    ),
+                  ],
+                ),
+              ),
+              // Footer
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: _buildAnimatedMenuItem(
+                  Icons.logout_rounded,
+                  'Sign Out',
+                  6,
+                  isDark,
+                  false,
+                  isDestructive: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedMenuItem(
+    IconData icon,
+    String title,
+    int index,
+    bool isDark,
+    bool isActive, {
+    bool isDestructive = false,
+  }) {
+    final color = isDestructive
+        ? AppColors.error
+        : (isActive
+              ? AppColors.primaryOrange
+              : (isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted));
+
+    final bgColor = isActive
+        ? AppColors.primaryOrange.withValues(alpha: 0.1)
+        : (isDestructive
+              ? AppColors.error.withValues(alpha: 0.05)
+              : Colors.transparent);
+
+    return Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: ListTile(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            leading: Icon(icon, color: color, size: 22),
+            title: Text(
+              title,
+              style: GoogleFonts.inter(
+                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                fontSize: 14,
+                color: isDestructive
+                    ? AppColors.error
+                    : (isDark ? Colors.white : AppColors.textDark),
+              ),
+            ),
+            onTap: () {},
+          ),
+        )
+        .animate()
+        .fadeIn(delay: (50 * index).ms)
+        .slideX(
+          begin: -0.2,
+          end: 0,
+          curve: Curves.easeOutQuad,
+          duration: 400.ms,
+        );
   }
 }
