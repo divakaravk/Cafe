@@ -166,11 +166,18 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
         width: isMobile ? 260.0 : 280.0,
         child: SafeArea(
           child: Container(
-            margin: const EdgeInsets.only(top: 12, bottom: 12, left: 12, right: 0),
+            margin: const EdgeInsets.only(
+              top: 12,
+              bottom: 12,
+              left: 12,
+              right: 0,
+            ),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(28),
               border: Border.all(
-                color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.05),
                 width: 1,
               ),
               boxShadow: [
@@ -178,7 +185,7 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                   color: Colors.black.withValues(alpha: 0.15),
                   blurRadius: 30,
                   offset: const Offset(5, 5),
-                )
+                ),
               ],
             ),
             child: ClipRRect(
@@ -191,8 +198,12 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                       colors: [
-                        isDark ? const Color(0xFF1E1E1E).withValues(alpha: 0.8) : Colors.white.withValues(alpha: 0.85),
-                        isDark ? const Color(0xFF121212).withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.95),
+                        isDark
+                            ? const Color(0xFF1E1E1E).withValues(alpha: 0.8)
+                            : Colors.white.withValues(alpha: 0.85),
+                        isDark
+                            ? const Color(0xFF121212).withValues(alpha: 0.9)
+                            : Colors.white.withValues(alpha: 0.95),
                       ],
                     ),
                   ),
@@ -239,8 +250,9 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
-                                        builder: (_) =>
-                                            KitchenScreen(companyId: widget.user.companyId),
+                                        builder: (_) => KitchenScreen(
+                                          companyId: widget.user.companyId,
+                                        ),
                                       ),
                                     );
                                   },
@@ -250,29 +262,117 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                                 const SizedBox(height: 12),
                                 _buildDrawerSection('ADMIN MASTERS', isDark),
                                 if (perms.canManageSettings)
-                                  _buildDrawerItem(Icons.business_rounded, 'Company Master', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CompanyMasterScreen())), isDark),
+                                  _buildDrawerItem(
+                                    Icons.business_rounded,
+                                    'Company Master',
+                                    () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const CompanyMasterScreen(),
+                                      ),
+                                    ),
+                                    isDark,
+                                  ),
                                 if (perms.canManageTables)
-                                  _buildDrawerItem(Icons.table_restaurant_rounded, 'Table Master', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const TableMasterScreen())), isDark),
+                                  _buildDrawerItem(
+                                    Icons.table_restaurant_rounded,
+                                    'Table Master',
+                                    () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const TableMasterScreen(),
+                                      ),
+                                    ),
+                                    isDark,
+                                  ),
                                 if (perms.canManageUsers)
-                                  _buildDrawerItem(Icons.people_alt_rounded, 'User Master', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserMasterScreen())), isDark),
+                                  _buildDrawerItem(
+                                    Icons.people_alt_rounded,
+                                    'User Master',
+                                    () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const UserMasterScreen(),
+                                      ),
+                                    ),
+                                    isDark,
+                                  ),
                                 if (perms.canManageItems)
-                                  _buildDrawerItem(Icons.category_rounded, 'Item Group', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ItemMasterScreen())), isDark),
+                                  _buildDrawerItem(
+                                    Icons.category_rounded,
+                                    'Item Group',
+                                    () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ItemMasterScreen(),
+                                      ),
+                                    ),
+                                    isDark,
+                                  ),
                                 if (perms.canManageItems)
-                                  _buildDrawerItem(Icons.inventory_2_rounded, 'Item Variant', () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ItemVariantScreen())), isDark),
+                                  _buildDrawerItem(
+                                    Icons.inventory_2_rounded,
+                                    'Item Variant',
+                                    () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            const ItemVariantScreen(),
+                                      ),
+                                    ),
+                                    isDark,
+                                  ),
                                 if (perms.canManageStock)
-                                  _buildDrawerItem(Icons.warehouse_rounded, 'Stock & Inventory', () {
-                                    Navigator.pop(context);
-                                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Stock module coming soon'), behavior: SnackBarBehavior.floating));
-                                  }, isDark),
+                                  _buildDrawerItem(
+                                    Icons.warehouse_rounded,
+                                    'Stock & Inventory',
+                                    () {
+                                      Navigator.pop(context);
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Stock module coming soon',
+                                          ),
+                                          behavior: SnackBarBehavior.floating,
+                                        ),
+                                      );
+                                    },
+                                    isDark,
+                                  ),
                               ],
                             ],
                             const SizedBox(height: 12),
                             _buildDrawerSection('ACCOUNT', isDark),
-                            _buildDrawerItem(Icons.person_outline_rounded, 'My Profile', () {
-                              Navigator.pop(context);
-                              Navigator.push(context, MaterialPageRoute(builder: (_) => MyProfileScreen(user: widget.user)));
-                            }, isDark),
-                            _buildDrawerItem(Icons.logout_rounded, 'Logout', () => ref.read(authStateProvider.notifier).signOut(), isDark, isError: true),
+                            _buildDrawerItem(
+                              Icons.person_outline_rounded,
+                              'My Profile',
+                              () {
+                                Navigator.pop(context);
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        MyProfileScreen(user: widget.user),
+                                  ),
+                                );
+                              },
+                              isDark,
+                            ),
+                            _buildDrawerItem(
+                              Icons.logout_rounded,
+                              'Logout',
+                              () => ref
+                                  .read(authStateProvider.notifier)
+                                  .signOut(),
+                              isDark,
+                              isError: true,
+                            ),
                           ],
                         ),
                       ),
@@ -286,11 +386,22 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
       ),
     );
   }
+
   String _formatDateTime(DateTime dt) {
     final local = dt.toLocal();
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     final h = local.hour % 12 == 0 ? 12 : local.hour % 12;
     final m = local.minute.toString().padLeft(2, '0');
@@ -301,7 +412,12 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
   Widget _buildDrawerUserHeader(bool isDark) {
     final user = widget.user;
     final initials = user.fullName.isNotEmpty
-        ? user.fullName.split(' ').take(2).map((w) => w.isNotEmpty ? w[0] : '').join().toUpperCase()
+        ? user.fullName
+              .split(' ')
+              .take(2)
+              .map((w) => w.isNotEmpty ? w[0] : '')
+              .join()
+              .toUpperCase()
         : '?';
 
     return Container(
@@ -361,11 +477,19 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                 height: 44,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.primaryOrange.withValues(alpha: 0.5), width: 1.5),
+                  border: Border.all(
+                    color: AppColors.primaryOrange.withValues(alpha: 0.5),
+                    width: 1.5,
+                  ),
                 ),
                 child: ClipOval(
                   child: user.avatarUrl != null && user.avatarUrl!.isNotEmpty
-                      ? Image.network(user.avatarUrl!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _initialsAvatar(initials))
+                      ? Image.network(
+                          user.avatarUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) =>
+                              _initialsAvatar(initials),
+                        )
                       : _initialsAvatar(initials),
                 ),
               ),
@@ -396,6 +520,23 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                             letterSpacing: 0.5,
                           ),
                         ),
+                        if (user.lastLogin != null) ...[
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              _formatDateTime(user.lastLogin!),
+                              style: GoogleFonts.inter(
+                                fontSize: 9,
+                                color: isDark
+                                    ? AppColors.textWhiteMuted
+                                    : AppColors.textDarkMuted,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ],
                     ),
                   ],
@@ -409,24 +550,24 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
   }
 
   Widget _initialsAvatar(String initials) => Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [AppColors.primaryAmber, AppColors.primaryOrange],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
+    decoration: const BoxDecoration(
+      gradient: LinearGradient(
+        colors: [AppColors.primaryAmber, AppColors.primaryOrange],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+    ),
+    child: Center(
+      child: Text(
+        initials,
+        style: GoogleFonts.inter(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
         ),
-        child: Center(
-          child: Text(
-            initials,
-            style: GoogleFonts.inter(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Colors.white,
-            ),
-          ),
-        ),
-      );
+      ),
+    ),
+  );
   Widget _buildDrawerSection(String title, bool isDark) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 16, 24, 8),
@@ -435,7 +576,9 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
         style: GoogleFonts.inter(
           fontSize: 10,
           fontWeight: FontWeight.w800,
-          color: isDark ? AppColors.textWhiteMuted.withValues(alpha: 0.5) : AppColors.textDarkMuted.withValues(alpha: 0.5),
+          color: isDark
+              ? AppColors.textWhiteMuted.withValues(alpha: 0.5)
+              : AppColors.textDarkMuted.withValues(alpha: 0.5),
           letterSpacing: 1.5,
         ),
       ),
@@ -450,12 +593,14 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
     bool isError = false,
     bool isSelected = false,
   }) {
-    final activeColor = isDark ? AppColors.primaryAmber : AppColors.primaryOrange;
+    final activeColor = isDark
+        ? AppColors.primaryAmber
+        : AppColors.primaryOrange;
     final contentColor = isError
         ? AppColors.error
         : (isSelected
-            ? activeColor
-            : (isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted));
+              ? activeColor
+              : (isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted));
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
@@ -471,7 +616,9 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
             duration: const Duration(milliseconds: 200),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
-              color: isSelected ? activeColor.withValues(alpha: 0.08) : Colors.transparent,
+              color: isSelected
+                  ? activeColor.withValues(alpha: 0.08)
+                  : Colors.transparent,
             ),
             child: Stack(
               children: [
@@ -484,31 +631,38 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                       width: 3,
                       decoration: BoxDecoration(
                         color: activeColor,
-                        borderRadius: const BorderRadius.horizontal(right: Radius.circular(4)),
+                        borderRadius: const BorderRadius.horizontal(
+                          right: Radius.circular(4),
+                        ),
                       ),
                     ),
                   ),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   child: Row(
                     children: [
-                      Icon(
-                        icon,
-                        size: 20,
-                        color: contentColor,
-                      ),
+                      Icon(icon, size: 20, color: contentColor),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Text(
                           title,
                           style: GoogleFonts.inter(
                             fontSize: 14,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.w500,
                             color: isError
                                 ? AppColors.error
                                 : (isSelected
-                                    ? (isDark ? Colors.white : AppColors.textDark)
-                                    : (isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted)),
+                                      ? (isDark
+                                            ? Colors.white
+                                            : AppColors.textDark)
+                                      : (isDark
+                                            ? AppColors.textWhiteMuted
+                                            : AppColors.textDarkMuted)),
                           ),
                         ),
                       ),
@@ -522,7 +676,6 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
       ),
     );
   }
-
 }
 
 class _NavModule {

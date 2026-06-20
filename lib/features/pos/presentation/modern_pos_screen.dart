@@ -26,6 +26,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     with TickerProviderStateMixin {
   String _searchQuery = '';
   final _searchController = TextEditingController();
+  // Owned focus node for the search field so the cursor only appears when the
+  // field is explicitly tapped — tapping elsewhere / scrolling drops focus.
+  final FocusNode _searchFocusNode = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Cart Animation State
@@ -36,6 +39,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
   // Top bar filter panel
   bool _showFilters = false;
+
+  // When true the app bar is collapsed away (search pinned in its place). Flips
+  // only after the grid is scrolled past a threshold — not 1:1 with scrolling.
+  bool _appBarCollapsed = false;
 
   // Group view toggle. ON: show Item Group chips + the selected group's items.
   // OFF: hide the group chips and show every selling item (variant) in one grid.
@@ -176,8 +183,22 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     _processingPayment.dispose();
     super.dispose();
+  }
+
+  /// Drops focus from the search field around a drawer opening/closing. On
+  /// close we unfocus again after the frame because Flutter restores focus to
+  /// the node that was focused when the drawer opened (the search field),
+  /// which otherwise brings the cursor/keyboard back.
+  void _dismissSearchFocusOnDrawer(bool isOpen) {
+    FocusScope.of(context).unfocus();
+    if (!isOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) FocusManager.instance.primaryFocus?.unfocus();
+      });
+    }
   }
 
   @override
@@ -200,6 +221,12 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
     return Scaffold(
       key: _scaffoldKey,
+      // Keep the search field's cursor/keyboard from lingering around the side
+      // menus. Unfocus when a drawer opens; and again after it closes via a
+      // post-frame callback, since Flutter otherwise restores focus to the
+      // search field (the node that was focused when the drawer opened).
+      onDrawerChanged: _dismissSearchFocusOnDrawer,
+      onEndDrawerChanged: _dismissSearchFocusOnDrawer,
       drawer: _buildLeftMenu(isDark, user),
       endDrawer: Padding(
         padding: const EdgeInsets.fromLTRB(0, 16, 16, 16),
@@ -211,119 +238,95 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           child: _buildBillingPanel(cart, cartNotifier, isDark, user),
         ),
       ),
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              // Top Bar (acts as the AppBar)
-              _buildTopBar(isDark, user),
-              // Item Groups + Search + Variant grid
-              Expanded(
-                child: Stack(
-                  children: [
-                    itemGroupsAsync.when(
-                      data: (items) {
-                        final groups = _activeGroups(items);
-                        if (groups.isEmpty) return _buildEmptyState(isDark);
-                        final selected = _effectiveGroup(groups);
-                        return Column(
-                          children: [
-                            // Horizontal Item Group selector — immediately
-                            // below the AppBar. Hidden when group view is off.
-                            if (_groupView)
-                              _buildPosGroupSelector(groups, selected, isDark),
-                            _buildSearchBar(isDark),
-                            Expanded(
-                              child: _groupView
-                                  // Only the selected group's selling items.
-                                  ? _buildGroupVariantGrid(
-                                      selected,
-                                      cart,
-                                      isDark,
-                                      showImages,
-                                    )
-                                  // Every selling item across all groups.
-                                  : _buildAllVariantsGrid(
-                                      groups,
-                                      cart,
-                                      isDark,
-                                      showImages,
-                                    ),
-                            ),
-                          ],
-                        );
-                      },
-                      loading: () => _buildSkeletonGrid(isDark),
-                      error: (e, _) => _buildNetworkErrorState(e, isDark, user),
-                    ),
-                    // Floating Microphone Button
-                    if (_isVoiceAIEnabled)
-                      Positioned(
-                        right: 20,
-                        bottom: 20,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (_isProcessingAI)
-                              const Padding(
-                                padding: EdgeInsets.only(bottom: 12),
-                                child: CircularProgressIndicator(
-                                  color: AppColors.primaryAmber,
-                                ),
-                              )
-                            else if (_isListening)
-                              Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 6,
-                                    ),
-                                    margin: const EdgeInsets.only(bottom: 12),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.error.withValues(
-                                        alpha: 0.1,
-                                      ),
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    child: Text(
-                                      'Listening...',
-                                      style: GoogleFonts.inter(
-                                        color: AppColors.error,
-                                        fontSize: 8,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  )
-                                  .animate(
-                                    onPlay: (controller) => controller.repeat(),
-                                  )
-                                  .fadeOut(duration: 800.ms)
-                                  .fadeIn(duration: 800.ms),
-                            FloatingActionButton(
-                                  onPressed: _isListening
-                                      ? _stopListening
-                                      : _startListening,
-                                  backgroundColor: _isListening
-                                      ? AppColors.error
-                                      : AppColors.primaryOrange,
-                                  elevation: 8,
-                                  child: Icon(
-                                    _isListening ? Icons.stop : Icons.mic,
-                                  ),
-                                )
-                                .animate(target: _isListening ? 1 : 0)
-                                .scale(
-                                  begin: const Offset(1, 1),
-                                  end: const Offset(1.1, 1.1),
-                                  duration: 500.ms,
-                                ),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
+      body: GestureDetector(
+        // Tapping anywhere outside the search field drops its focus, so the
+        // cursor only shows while the field itself is tapped. Translucent so
+        // taps still reach the grid tiles / buttons underneath.
+        behavior: HitTestBehavior.translucent,
+        onTap: () => FocusScope.of(context).unfocus(),
+        child: Stack(
+          children: [
+            itemGroupsAsync.when(
+            data: (items) {
+              final groups = _activeGroups(items);
+              if (groups.isEmpty) {
+                return _fixedTopBar(isDark, user, _buildEmptyState(isDark));
+              }
+              final selected = _effectiveGroup(groups);
+              return _buildScrollableMenu(
+                groups,
+                selected,
+                cart,
+                isDark,
+                showImages,
+                user,
+              );
+            },
+            loading: () =>
+                _fixedTopBar(isDark, user, _buildSkeletonGrid(isDark)),
+            error: (e, _) => _fixedTopBar(
+              isDark,
+              user,
+              _buildNetworkErrorState(e, isDark, user),
+            ),
           ),
+          // Floating Microphone Button
+          if (_isVoiceAIEnabled)
+            Positioned(
+              right: 20,
+              bottom: 20,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_isProcessingAI)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 12),
+                      child: CircularProgressIndicator(
+                        color: AppColors.primaryAmber,
+                      ),
+                    )
+                  else if (_isListening)
+                    Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: AppColors.error.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Text(
+                            'Listening...',
+                            style: GoogleFonts.inter(
+                              color: AppColors.error,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        )
+                        .animate(onPlay: (controller) => controller.repeat())
+                        .fadeOut(duration: 800.ms)
+                        .fadeIn(duration: 800.ms),
+                  FloatingActionButton(
+                        onPressed: _isListening
+                            ? _stopListening
+                            : _startListening,
+                        backgroundColor: _isListening
+                            ? AppColors.error
+                            : AppColors.primaryOrange,
+                        elevation: 8,
+                        child: Icon(_isListening ? Icons.stop : Icons.mic),
+                      )
+                      .animate(target: _isListening ? 1 : 0)
+                      .scale(
+                        begin: const Offset(1, 1),
+                        end: const Offset(1.1, 1.1),
+                        duration: 500.ms,
+                      ),
+                ],
+              ),
+            ),
           // Toggle arrows (Navigation ONLY)
           _buildSideToggles(isTablet),
 
@@ -333,7 +336,8 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           // Filter Panel Overlay
           if (_showFilters)
             Positioned(top: 90, right: 20, child: _buildFilterPanel(isDark)),
-        ],
+          ],
+        ),
       ),
       // Bottom sheet billing for mobile
       bottomSheet: !isTablet && cart.isNotEmpty
@@ -342,140 +346,249 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     );
   }
 
-  // ─── TOP BAR ────────────────────────────────────────────
-  Widget _buildTopBar(bool isDark, UserProfile user) {
+  // ─── FIXED TOP BAR (loading / error / empty states) ────
+  /// Non-scrolling layout: app bar stays put above a state widget. Used when
+  /// there's nothing to scroll, so the collapsing-bar behavior isn't needed.
+  Widget _fixedTopBar(bool isDark, UserProfile user, Widget child) {
+    return Column(
+      children: [
+        _buildTopBar(isDark, user),
+        Expanded(child: child),
+      ],
+    );
+  }
+
+  // ─── SCROLLABLE MENU (collapsing app bar) ──────────────
+  /// App bar + search (+ group chips) stay fixed above the scrolling grid. The
+  /// app bar holds its place and only collapses away once the grid is scrolled
+  /// past [_kAppBarCollapseThreshold] — so it moves after a bit of scrolling,
+  /// not from the very first pixel. When it collapses, the search slides up into
+  /// its place; scrolling back near the top brings the app bar back.
+  Widget _buildScrollableMenu(
+    List<Item> groups,
+    Item selected,
+    List<CartItem> cart,
+    bool isDark,
+    bool showImages,
+    UserProfile user,
+  ) {
     return SafeArea(
       bottom: false,
-      child: Container(
-        margin: const EdgeInsets.fromLTRB(10, 12, 10, 8),
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
-        decoration: BoxDecoration(
-          color: isDark ? AppColors.darkSurface : Colors.white,
-          borderRadius: BorderRadius.circular(100),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
+      child: Column(
+        children: [
+          // App bar — collapsed (height → 0) once past the scroll threshold.
+          AnimatedSize(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: _appBarCollapsed
+                ? const SizedBox(width: double.infinity)
+                : _buildTopBar(isDark, user, safeArea: false),
+          ),
+          // Sticky search (+ group chips) — never scrolls; takes the app bar's
+          // place once it collapses.
+          if (_groupView) _buildPosGroupSelector(groups, selected, isDark),
+          _buildSearchBar(isDark),
+          // Grid — the only scrolling area; its offset drives the collapse.
+          Expanded(
+            child: NotificationListener<ScrollNotification>(
+              onNotification: _handleMenuScroll,
+              child: _groupView
+                  // Only the selected group's selling items.
+                  ? _buildGroupVariantGrid(selected, cart, isDark, showImages)
+                  // Every selling item across all groups.
+                  : _buildAllVariantsGrid(groups, cart, isDark, showImages),
             ),
-          ],
-        ),
-        child: Row(
-          children: [
-            // Logo / Store indicator
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [AppColors.primaryAmber, AppColors.primaryOrange],
-                ),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.primaryOrange.withValues(alpha: 0.3),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Scroll past this many pixels to collapse the app bar; drop back below the
+  // lower bound to bring it back. The gap is hysteresis so it doesn't flicker.
+  static const double _kAppBarCollapseThreshold = 64;
+  static const double _kAppBarExpandThreshold = 16;
+
+  /// Toggles the app bar based on how far the grid has scrolled. Returns false
+  /// so the notification keeps bubbling.
+  bool _handleMenuScroll(ScrollNotification n) {
+    if (n.metrics.axis != Axis.vertical) return false;
+    final pixels = n.metrics.pixels;
+    if (!_appBarCollapsed && pixels > _kAppBarCollapseThreshold) {
+      setState(() => _appBarCollapsed = true);
+    } else if (_appBarCollapsed && pixels < _kAppBarExpandThreshold) {
+      setState(() => _appBarCollapsed = false);
+    }
+    return false;
+  }
+
+  // ─── TOP BAR ────────────────────────────────────────────
+  Widget _buildTopBar(bool isDark, UserProfile user, {bool safeArea = true}) {
+    final bar = Container(
+      margin: const EdgeInsets.fromLTRB(10, 12, 10, 8),
+      padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkSurface : Colors.white,
+        borderRadius: BorderRadius.circular(100),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Logo / Store indicator
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppColors.primaryAmber, AppColors.primaryOrange],
               ),
-              child: const Icon(
-                Icons.restaurant_rounded,
-                color: Colors.white,
-                size: 18,
-              ),
-            ),
-            const SizedBox(width: 12),
-
-            // Text Details
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Rasabhojan',
-                    style: GoogleFonts.outfit(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: isDark ? Colors.white : AppColors.textDark,
-                      letterSpacing: -0.5,
-                      height: 1.15,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Container(
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          color: AppColors.success,
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          '${user.fullName} • ${user.role}',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: isDark
-                                ? AppColors.textWhiteMuted
-                                : AppColors.textDarkMuted,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-
-            // Right actions
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Theme Toggle
-                _buildActionButton(
-                  isDark: isDark,
-                  icon: ref.watch(isDarkModeProvider)
-                      ? Icons.light_mode_rounded
-                      : Icons.dark_mode_rounded,
-                  onTap: () => ref.read(isDarkModeProvider.notifier).toggle(),
-                ),
-                const SizedBox(width: 8),
-
-                // Group Toggle
-                _buildActionButton(
-                  isDark: isDark,
-                  icon: Icons.category_rounded,
-                  isActive: _groupView,
-                  onTap: () => setState(() => _groupView = !_groupView),
-                ),
-                const SizedBox(width: 8),
-
-                // Filter Toggle
-                _buildActionButton(
-                  isDark: isDark,
-                  icon: Icons.tune_rounded,
-                  isActive: _showFilters,
-                  onTap: () => setState(() => _showFilters = !_showFilters),
-                  isPrimary: true,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primaryOrange.withValues(alpha: 0.3),
+                  blurRadius: 6,
+                  offset: const Offset(0, 2),
                 ),
               ],
             ),
-          ],
-        ),
+            child: const Icon(
+              Icons.restaurant_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+
+          // Text Details
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Rasabhojan',
+                  style: GoogleFonts.outfit(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.white : AppColors.textDark,
+                    letterSpacing: -0.5,
+                    height: 1.15,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    StreamBuilder(
+                      stream: Stream.periodic(const Duration(seconds: 1)),
+                      builder: (context, _) {
+                        final now = DateTime.now();
+                        final h = now.hour % 12 == 0 ? 12 : now.hour % 12;
+                        final m = now.minute.toString().padLeft(2, '0');
+                        final ampm = now.hour < 12 ? 'AM' : 'PM';
+
+                        final textStyle = GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark
+                              ? AppColors.textWhiteMuted
+                              : AppColors.textDarkMuted,
+                        );
+
+                        Widget buildAnimText(String text) {
+                          return AnimatedSwitcher(
+                            duration: const Duration(milliseconds: 400),
+                            transitionBuilder:
+                                (Widget child, Animation<double> animation) {
+                                  return FadeTransition(
+                                    opacity: animation,
+                                    child: SlideTransition(
+                                      position:
+                                          Tween<Offset>(
+                                            begin: const Offset(0.0, -0.3),
+                                            end: Offset.zero,
+                                          ).animate(
+                                            CurvedAnimation(
+                                              parent: animation,
+                                              curve: Curves.easeOutCubic,
+                                            ),
+                                          ),
+                                      child: child,
+                                    ),
+                                  );
+                                },
+                            child: Text(
+                              text,
+                              key: ValueKey<String>(text),
+                              style: textStyle,
+                            ),
+                          );
+                        }
+
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            buildAnimText('$h'),
+                            Text(':', style: textStyle),
+                            buildAnimText(m),
+                            Text(' $ampm', style: textStyle),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // Right actions
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Theme Toggle
+              _buildActionButton(
+                isDark: isDark,
+                icon: ref.watch(isDarkModeProvider)
+                    ? Icons.light_mode_rounded
+                    : Icons.dark_mode_rounded,
+                onTap: () => ref.read(isDarkModeProvider.notifier).toggle(),
+              ),
+              const SizedBox(width: 8),
+
+              // Group Toggle
+              _buildActionButton(
+                isDark: isDark,
+                icon: Icons.category_rounded,
+                isActive: _groupView,
+                onTap: () => setState(() => _groupView = !_groupView),
+              ),
+              const SizedBox(width: 8),
+
+              // Filter Toggle
+              _buildActionButton(
+                isDark: isDark,
+                icon: Icons.tune_rounded,
+                isActive: _showFilters,
+                onTap: () => setState(() => _showFilters = !_showFilters),
+                isPrimary: true,
+              ),
+            ],
+          ),
+        ],
       ),
     ).animate().fadeIn(duration: 300.ms);
+    return safeArea ? SafeArea(bottom: false, child: bar) : bar;
   }
 
   Widget _buildActionButton({
@@ -741,26 +854,62 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   }
 
   // ─── SEARCH BAR ─────────────────────────────────────────
+  /// Sticky search field. It lives above the scrolling variant grid (so it
+  /// never scrolls away) and is styled as a rounded pill to match the top bar,
+  /// reading as part of the app-bar zone — especially when group view is off
+  /// and the flat variant list scrolls underneath it.
   Widget _buildSearchBar(bool isDark) {
+    final muted = isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-      child: TextField(
-        controller: _searchController,
-        onChanged: (v) => setState(() => _searchQuery = v.toLowerCase()),
-        decoration: InputDecoration(
-          hintText: 'Search items...',
-          prefixIcon: const Icon(Icons.search_rounded, size: 20),
-          suffixIcon: _searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.close_rounded, size: 18),
-                  onPressed: () {
-                    _searchController.clear();
-                    setState(() => _searchQuery = '');
-                  },
-                )
-              : null,
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+      child: Container(
+        height: kPosSearchPillHeight,
+        decoration: BoxDecoration(
+          color: isDark ? AppColors.darkSurface : Colors.white,
+          borderRadius: BorderRadius.circular(100),
+          border: Border.all(
+            color: isDark ? AppColors.darkBorder : Colors.grey.shade200,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: TextField(
+          controller: _searchController,
+          focusNode: _searchFocusNode,
+          textAlignVertical: TextAlignVertical.center,
+          onChanged: (v) => setState(() => _searchQuery = v.toLowerCase()),
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: isDark ? Colors.white : AppColors.textDark,
+          ),
+          decoration: InputDecoration(
+            hintText: 'Search items...',
+            hintStyle: GoogleFonts.inter(fontSize: 14, color: muted),
+            prefixIcon: Icon(Icons.search_rounded, size: 20, color: muted),
+            suffixIcon: _searchQuery.isNotEmpty
+                ? IconButton(
+                    icon: Icon(Icons.close_rounded, size: 18, color: muted),
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() => _searchQuery = '');
+                      // Drop focus so the cursor/keyboard dismiss on cancel.
+                      FocusScope.of(context).unfocus();
+                    },
+                  )
+                : null,
+            isDense: true,
+            filled: false,
+            border: InputBorder.none,
+            enabledBorder: InputBorder.none,
+            focusedBorder: InputBorder.none,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          ),
         ),
       ),
     );
@@ -851,6 +1000,8 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     if (variants.isEmpty) return _buildEmptyState(isDark);
 
     return GridView.builder(
+      // Scrolling the menu dismisses the search field's keyboard/cursor.
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: _gridPadding(cart),
       gridDelegate: _menuGridDelegate(showImages),
       itemCount: variants.length,
@@ -953,6 +1104,8 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     if (all.isEmpty) return _buildEmptyState(isDark);
 
     return GridView.builder(
+      // Scrolling the menu dismisses the search field's keyboard/cursor.
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
       padding: _gridPadding(cart),
       gridDelegate: _menuGridDelegate(showImages),
       itemCount: all.length,
@@ -2087,3 +2240,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
         );
   }
 }
+
+/// Fixed height of the search pill, so the search row keeps a stable size as
+/// the app bar above it collapses and expands.
+const double kPosSearchPillHeight = 46;
