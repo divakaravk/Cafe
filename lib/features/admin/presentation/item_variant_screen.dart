@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -9,6 +10,10 @@ import '../../../core/services/supabase_service.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 
+/// Manages the SELLING ITEMS (variants) that belong to one Item Group.
+///
+/// Example: open the "Dosa" group → Plain Dosa, Ghee Dosa, Masala Dosa…
+/// A selling item with an empty/zero Override Rate inherits the group rate.
 class ItemVariantScreen extends ConsumerStatefulWidget {
   final Item? item;
   const ItemVariantScreen({super.key, this.item});
@@ -20,17 +25,28 @@ class ItemVariantScreen extends ConsumerStatefulWidget {
 class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
   bool _isLoading = false;
   List<ItemVariant> _variants = [];
-  List<Map<String, dynamic>> _masterItems = [];
+  List<Item> _groups = [];
   List<Map<String, dynamic>> _hsns = [];
 
-  String? _selectedMasterId;
-  Map<String, dynamic>? _selectedMasterData;
+  String? _selectedGroupId;
+  Item? _selectedGroup;
+
+  // List search
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
-    _selectedMasterId = widget.item?.id;
+    _selectedGroupId = widget.item?.id;
+    _selectedGroup = widget.item;
     _initialLoad();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> _initialLoad() async {
@@ -39,49 +55,43 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
       final user = ref.read(authStateProvider).value;
       if (user == null) return;
 
-      // Parallel fetch
       final results = await Future.wait([
-        SupabaseService.getMasterItemsForVariants(user.companyId),
+        SupabaseService.getItemGroups(user.companyId),
         SupabaseService.getCompanyHsns(user.companyId),
       ]);
 
-      setState(() {
-        _masterItems = results[0];
-        _hsns = results[1];
+      final groups = results[0]
+          .map((e) => Item.fromJson(e))
+          .toList()
+        ..sort(
+          (a, b) => a.itemName.toLowerCase().compareTo(b.itemName.toLowerCase()),
+        );
 
-        if (_selectedMasterId != null) {
-          _selectedMasterData = _masterItems.firstWhere(
-            (m) => m['id'] == _selectedMasterId,
-            orElse: () => {},
+      setState(() {
+        _groups = groups;
+        _hsns = results[1];
+        if (_selectedGroupId != null) {
+          _selectedGroup = _groups.firstWhere(
+            (g) => g.id == _selectedGroupId,
+            orElse: () => _selectedGroup ?? _groups.first,
           );
-          if (_selectedMasterData?.isEmpty ?? true) _selectedMasterData = null;
         }
       });
 
-      if (_selectedMasterId != null) {
-        await _loadVariants();
-      }
+      if (_selectedGroupId != null) await _loadVariants();
     } catch (e) {
       _showError('Load error: $e');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
   Future<void> _loadVariants() async {
-    if (_selectedMasterId == null) return;
+    if (_selectedGroupId == null) return;
     try {
-      final items = await SupabaseService.getAllItems(
-        ref.read(authStateProvider).value!.companyId,
-      );
-      final currentItemData = items.firstWhere(
-        (i) => i['id'] == _selectedMasterId,
-      );
-      final currentItem = Item.fromJson(currentItemData);
-
+      final rows = await SupabaseService.getVariantsByGroup(_selectedGroupId!);
       setState(() {
-        _variants = currentItem.variants;
-        _selectedMasterData = currentItemData;
+        _variants = rows.map((e) => ItemVariant.fromJson(e)).toList();
       });
     } catch (e) {
       _showError('Variant load error: $e');
@@ -89,28 +99,34 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
   }
 
   void _showError(String msg) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: AppColors.error),
     );
   }
 
+  double get _groupBaseRate => _selectedGroup?.baseRate ?? 0;
+
   void _addOrEditVariant([ItemVariant? variant]) {
-    if (_selectedMasterId == null) {
-      _showError('Please select a Master Item first');
+    if (_selectedGroupId == null) {
+      _showError('Please select an Item Group first');
       return;
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final formKey = GlobalKey<FormState>();
 
-    // Form State
     final nameController = TextEditingController(
       text: variant?.variantName ?? '',
     );
+    // Show the override rate only when it actually overrides; otherwise leave
+    // blank so the user sees it is inheriting the group rate.
     final rateController = TextEditingController(
-      text: variant?.baseRate.toString() ?? '',
-    );
-    final inclusiveRateController = TextEditingController(
-      text: variant?.inclusiveRate.toString() ?? '0',
+      text: (variant != null && variant.hasPriceOverride)
+          ? variant.baseRate.toStringAsFixed(
+              variant.baseRate.truncateToDouble() == variant.baseRate ? 0 : 2,
+            )
+          : '',
     );
     final descController = TextEditingController(
       text: variant?.description ?? '',
@@ -119,23 +135,15 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
       text: variant?.displayOrder.toString() ?? '0',
     );
 
-    String? selectedHsnId = variant?.hsnId ?? _selectedMasterData?['hsn_id'];
-    bool isRateInclusive =
-        variant?.isRateInclusive ??
-        _selectedMasterData?['is_rate_inclusive'] ??
-        false;
+    String? selectedHsnId = variant?.hsnId ?? _selectedGroup?.hsnId;
+    String foodType = variant?.foodType ?? 'veg';
     bool isAvailable = variant?.isAvailable ?? true;
     bool isActive = variant?.isActive ?? true;
+    bool isDefault =
+        variant?.isDefault ?? _variants.isEmpty; // first item defaults to true
     XFile? pickedImage;
     String? currentImageUrl = variant?.imageUrl;
-
-    // If adding new, inherit base rate if empty
-    if (variant == null && rateController.text == '0.0' ||
-        rateController.text.isEmpty) {
-      rateController.text = (_selectedMasterData?['base_rate'] ?? 0).toString();
-      inclusiveRateController.text =
-          (_selectedMasterData?['inclusive_rate'] ?? 0).toString();
-    }
+    bool isSaving = false;
 
     showModalBottomSheet(
       context: context,
@@ -143,251 +151,391 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
       backgroundColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) {
-          return Container(
-            height: MediaQuery.of(context).size.height * 0.85,
-            decoration: BoxDecoration(
-              color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(24),
-              ),
+          return Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
             ),
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            child: Container(
+              height: MediaQuery.of(context).size.height * 0.88,
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+              ),
+              padding: const EdgeInsets.all(24),
+              child: Form(
+                key: formKey,
+                child: Column(
                   children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Flexible(
+                          child: Text(
+                            variant == null
+                                ? 'New Selling Item'
+                                : 'Edit Selling Item',
+                            style: GoogleFonts.inter(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
                     Text(
-                      variant == null ? 'New Variant' : 'Edit Variant',
+                      'in ${_selectedGroup?.itemName ?? ''}',
                       style: GoogleFonts.inter(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        color: Colors.grey,
                       ),
                     ),
-                    IconButton(
-                      onPressed: () => Navigator.pop(context),
-                      icon: const Icon(Icons.close_rounded),
+                    const Divider(),
+                    Expanded(
+                      child: ListView(
+                        children: [
+                          Center(
+                            child: GestureDetector(
+                              onTap: () async {
+                                final picker = ImagePicker();
+                                final img = await picker.pickImage(
+                                  source: ImageSource.gallery,
+                                  imageQuality: 50,
+                                );
+                                if (img != null) {
+                                  setModalState(() => pickedImage = img);
+                                }
+                              },
+                              child: Container(
+                                width: 120,
+                                height: 120,
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? AppColors.darkBg
+                                      : AppColors.lightBg,
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(
+                                    color: isDark
+                                        ? AppColors.darkBorder
+                                        : AppColors.lightBorder,
+                                  ),
+                                  image: pickedImage != null
+                                      ? DecorationImage(
+                                          image: FileImage(
+                                            File(pickedImage!.path),
+                                          ),
+                                          fit: BoxFit.cover,
+                                        )
+                                      : (currentImageUrl != null
+                                            ? DecorationImage(
+                                                image: NetworkImage(
+                                                  currentImageUrl,
+                                                ),
+                                                fit: BoxFit.cover,
+                                              )
+                                            : null),
+                                ),
+                                child:
+                                    (pickedImage == null &&
+                                        currentImageUrl == null)
+                                    ? const Icon(
+                                        Icons.add_a_photo_rounded,
+                                        size: 32,
+                                        color: Colors.grey,
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+
+                          TextFormField(
+                            controller: nameController,
+                            autovalidateMode:
+                                AutovalidateMode.onUserInteraction,
+                            validator: (v) => (v == null || v.trim().isEmpty)
+                                ? 'Variant name is required'
+                                : null,
+                            decoration: _inputDecoration(
+                              'Variant Name',
+                              Icons.label_important_rounded,
+                              isDark,
+                            ),
+                            style: GoogleFonts.inter(fontSize: 14),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // Food type — veg / egg / non-veg per selling item
+                          _buildFoodTypeSelector(
+                            foodType,
+                            (v) => setModalState(() => foodType = v),
+                            isDark,
+                          ),
+                          const SizedBox(height: 16),
+
+                          TextFormField(
+                            controller: rateController,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(
+                                RegExp(r'^\d*\.?\d{0,2}'),
+                              ),
+                            ],
+                            autovalidateMode:
+                                AutovalidateMode.onUserInteraction,
+                            validator: (v) {
+                              final raw = (v ?? '').trim();
+                              if (raw.isEmpty) return null; // inherits
+                              final parsed = double.tryParse(raw);
+                              if (parsed == null) return 'Enter a valid number';
+                              if (parsed < 0) {
+                                return 'Override rate must be ≥ 0';
+                              }
+                              return null;
+                            },
+                            decoration: _inputDecoration(
+                              'Override Base Rate',
+                              Icons.currency_rupee_rounded,
+                              isDark,
+                            ).copyWith(
+                              helperText:
+                                  'Leave empty to inherit group rate '
+                                  '(₹${_groupBaseRate.toStringAsFixed(0)})',
+                            ),
+                            style: GoogleFonts.inter(fontSize: 14),
+                          ),
+                          const SizedBox(height: 16),
+
+                          DropdownButtonFormField<String?>(
+                            initialValue: selectedHsnId,
+                            isExpanded: true,
+                            items: [
+                              const DropdownMenuItem<String?>(
+                                value: null,
+                                child: Text('Inherit group HSN'),
+                              ),
+                              ..._hsns.map(
+                                (h) => DropdownMenuItem<String?>(
+                                  value: h['id'] as String,
+                                  child: Text(
+                                    '${h['hsn_code']} • ${(h['gst_rate'] ?? 0)}%',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            onChanged: (v) =>
+                                setModalState(() => selectedHsnId = v),
+                            decoration: _inputDecoration(
+                              'HSN Code',
+                              Icons.receipt_long_rounded,
+                              isDark,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          TextFormField(
+                            controller: descController,
+                            maxLines: 2,
+                            decoration: _inputDecoration(
+                              'Description',
+                              Icons.description_rounded,
+                              isDark,
+                            ),
+                            style: GoogleFonts.inter(fontSize: 14),
+                          ),
+                          const SizedBox(height: 16),
+
+                          TextFormField(
+                            controller: orderController,
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                            ],
+                            autovalidateMode:
+                                AutovalidateMode.onUserInteraction,
+                            validator: (v) {
+                              final raw = (v ?? '').trim();
+                              if (raw.isEmpty) return null;
+                              final parsed = int.tryParse(raw);
+                              if (parsed == null) return 'Enter a whole number';
+                              if (parsed < 0) {
+                                return 'Display order must be ≥ 0';
+                              }
+                              return null;
+                            },
+                            decoration: _inputDecoration(
+                              'Display Order',
+                              Icons.sort_rounded,
+                              isDark,
+                            ),
+                            style: GoogleFonts.inter(fontSize: 14),
+                          ),
+                          const SizedBox(height: 16),
+
+                          _buildToggle(
+                            'Default Variant',
+                            isDefault,
+                            (v) => setModalState(() => isDefault = v),
+                            isDark,
+                          ),
+                          _buildToggle(
+                            'Available',
+                            isAvailable,
+                            (v) => setModalState(() => isAvailable = v),
+                            isDark,
+                          ),
+                          _buildToggle(
+                            'Active',
+                            isActive,
+                            (v) => setModalState(() => isActive = v),
+                            isDark,
+                          ),
+                          const SizedBox(height: 24),
+
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              minimumSize: const Size.fromHeight(56),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            onPressed: isSaving
+                                ? null
+                                : () async {
+                                    if (!formKey.currentState!.validate()) {
+                                      return;
+                                    }
+                                    setModalState(() => isSaving = true);
+                                    final ok = await _saveVariant(
+                                      existing: variant,
+                                      name: nameController.text.trim(),
+                                      overrideRateRaw:
+                                          rateController.text.trim(),
+                                      hsnId: selectedHsnId,
+                                      description: descController.text.trim(),
+                                      displayOrder:
+                                          int.tryParse(
+                                            orderController.text.trim(),
+                                          ) ??
+                                          0,
+                                      isAvailable: isAvailable,
+                                      isActive: isActive,
+                                      isDefault: isDefault,
+                                      foodType: foodType,
+                                      pickedImage: pickedImage,
+                                      currentImageUrl: currentImageUrl,
+                                    );
+                                    if (ok && context.mounted) {
+                                      Navigator.pop(context);
+                                    } else {
+                                      setModalState(() => isSaving = false);
+                                    }
+                                  },
+                            child: isSaving
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Text('SAVE SELLING ITEM'),
+                          ),
+                          const SizedBox(height: 40),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-                const Divider(),
-                Expanded(
-                  child: ListView(
-                    children: [
-                      // Image Section
-                      Center(
-                        child: GestureDetector(
-                          onTap: () async {
-                            final picker = ImagePicker();
-                            final img = await picker.pickImage(
-                              source: ImageSource.gallery,
-                              imageQuality: 50,
-                            );
-                            if (img != null)
-                              setModalState(() => pickedImage = img);
-                          },
-                          child: Container(
-                            width: 120,
-                            height: 120,
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? AppColors.darkBg
-                                  : AppColors.lightBg,
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: isDark
-                                    ? AppColors.darkBorder
-                                    : AppColors.lightBorder,
-                              ),
-                              image: pickedImage != null
-                                  ? DecorationImage(
-                                      image: FileImage(File(pickedImage!.path)),
-                                      fit: BoxFit.cover,
-                                    )
-                                  : (currentImageUrl != null
-                                        ? DecorationImage(
-                                            image: NetworkImage(
-                                              currentImageUrl!,
-                                            ),
-                                            fit: BoxFit.cover,
-                                          )
-                                        : null),
-                            ),
-                            child:
-                                (pickedImage == null && currentImageUrl == null)
-                                ? const Icon(
-                                    Icons.add_a_photo_rounded,
-                                    size: 32,
-                                    color: Colors.grey,
-                                  )
-                                : null,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-
-                      _buildField(
-                        'Variant Name',
-                        nameController,
-                        Icons.label_important_rounded,
-                        isDark,
-                      ),
-                      const SizedBox(height: 16),
-
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildField(
-                              'Base Rate',
-                              rateController,
-                              Icons.currency_rupee_rounded,
-                              isDark,
-                              keyboardType: TextInputType.number,
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: _buildField(
-                              'Inclusive Rate',
-                              inclusiveRateController,
-                              Icons.payments_rounded,
-                              isDark,
-                              keyboardType: TextInputType.number,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // HSN Dropdown
-                      DropdownButtonFormField<String>(
-                        value: selectedHsnId,
-                        items: _hsns
-                            .map(
-                              (h) => DropdownMenuItem(
-                                value: h['id'] as String,
-                                child: Text(
-                                  '${h['hsn_code']} - ${h['description']}',
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) =>
-                            setModalState(() => selectedHsnId = v),
-                        decoration: _inputDecoration(
-                          'HSN Code',
-                          Icons.receipt_long_rounded,
-                          isDark,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      _buildField(
-                        'Description',
-                        descController,
-                        Icons.description_rounded,
-                        isDark,
-                        maxLines: 2,
-                      ),
-                      const SizedBox(height: 16),
-
-                      _buildField(
-                        'Display Order',
-                        orderController,
-                        Icons.sort_rounded,
-                        isDark,
-                        keyboardType: TextInputType.number,
-                      ),
-                      const SizedBox(height: 24),
-
-                      _buildToggle(
-                        'Is Rate Inclusive',
-                        isRateInclusive,
-                        (v) => setModalState(() => isRateInclusive = v),
-                        isDark,
-                      ),
-                      _buildToggle(
-                        'Is Available',
-                        isAvailable,
-                        (v) => setModalState(() => isAvailable = v),
-                        isDark,
-                      ),
-                      _buildToggle(
-                        'Is Active',
-                        isActive,
-                        (v) => setModalState(() => isActive = v),
-                        isDark,
-                      ),
-
-                      const SizedBox(height: 32),
-
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          minimumSize: const Size.fromHeight(56),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        onPressed: () async {
-                          final id = variant?.id ?? const Uuid().v4();
-                          String? finalImageUrl = currentImageUrl;
-
-                          if (pickedImage != null) {
-                            final bytes = await pickedImage!.readAsBytes();
-                            final ext = pickedImage!.name.split('.').last;
-                            finalImageUrl =
-                                await SupabaseService.uploadItemImage(
-                                  id,
-                                  bytes,
-                                  ext,
-                                );
-                          }
-
-                          final data = {
-                            'id': id,
-                            'item_id': _selectedMasterId,
-                            'variant_name': nameController.text,
-                            'base_rate':
-                                double.tryParse(rateController.text) ?? 0,
-                            'inclusive_rate':
-                                double.tryParse(inclusiveRateController.text) ??
-                                0,
-                            'is_rate_inclusive': isRateInclusive,
-                            'hsn_id': selectedHsnId,
-                            'description': descController.text,
-                            'display_order':
-                                int.tryParse(orderController.text) ?? 0,
-                            'is_available': isAvailable,
-                            'is_active': isActive,
-                          };
-
-                          await SupabaseService.upsertVariant(data);
-                          await _loadVariants();
-                          if (context.mounted) Navigator.pop(context);
-                          ref.invalidate(
-                            itemGroupsProvider(
-                              ref.read(authStateProvider).value!.companyId,
-                            ),
-                          );
-                          ref.invalidate(
-                            allItemsProvider(
-                              ref.read(authStateProvider).value!.companyId,
-                            ),
-                          );
-                        },
-                        child: const Text('SAVE VARIANT'),
-                      ),
-                      const SizedBox(height: 40),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
           );
         },
       ),
     );
+  }
+
+  Future<bool> _saveVariant({
+    required ItemVariant? existing,
+    required String name,
+    required String overrideRateRaw,
+    required String? hsnId,
+    required String description,
+    required int displayOrder,
+    required bool isAvailable,
+    required bool isActive,
+    required bool isDefault,
+    required String foodType,
+    required XFile? pickedImage,
+    required String? currentImageUrl,
+  }) async {
+    try {
+      final user = ref.read(authStateProvider).value!;
+      final id = existing?.id ?? const Uuid().v4();
+
+      String? finalImageUrl = currentImageUrl;
+      if (pickedImage != null) {
+        final bytes = await pickedImage.readAsBytes();
+        final ext = pickedImage.name.split('.').last;
+        finalImageUrl = await SupabaseService.uploadItemImage(id, bytes, ext);
+      }
+
+      // Empty override => inherit (store 0); otherwise the variant overrides.
+      final overrideRate =
+          overrideRateRaw.isEmpty ? 0.0 : (double.tryParse(overrideRateRaw) ?? 0);
+
+      await SupabaseService.upsertVariant({
+        'id': id,
+        'item_id': _selectedGroupId,
+        'variant_name': name,
+        'base_rate': overrideRate,
+        'hsn_id': hsnId,
+        'description': description.isEmpty ? null : description,
+        'image_url': finalImageUrl,
+        'display_order': displayOrder,
+        'is_available': isAvailable,
+        'is_active': isActive,
+        'is_default': isDefault,
+        'food_type': foodType,
+        'updated_by': user.id,
+      });
+
+      // Enforce a single default per group + sync the group pointer.
+      if (isDefault) {
+        await SupabaseService.setDefaultVariant(
+          itemId: _selectedGroupId!,
+          variantId: id,
+        );
+      }
+
+      await _loadVariants();
+      _invalidateGroup();
+      return true;
+    } catch (e) {
+      _showError('Save failed: $e');
+      return false;
+    }
+  }
+
+  void _invalidateGroup() {
+    final user = ref.read(authStateProvider).value;
+    if (user != null) {
+      ref.invalidate(itemGroupsProvider(user.companyId));
+      ref.invalidate(allItemsProvider(user.companyId));
+    }
+    if (_selectedGroupId != null) {
+      ref.invalidate(variantsByGroupProvider(_selectedGroupId!));
+    }
   }
 
   @override
@@ -398,54 +546,137 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
       backgroundColor: isDark ? AppColors.darkBg : AppColors.lightBg,
       appBar: AppBar(
         title: Text(
-          'Variant Manager',
-          style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+          'Item Variant',
+          style: GoogleFonts.inter(
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
         ),
-        actions: [
-          if (_selectedMasterId != null)
-            IconButton(
-              onPressed: _addOrEditVariant,
-              icon: const Icon(Icons.add_rounded),
-            ),
-        ],
-      ),
-      body: Column(
-        children: [
-          // Master Item Selector
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-            child: DropdownButtonFormField<String>(
-              value: _selectedMasterId,
-              items: _masterItems
-                  .map(
-                    (m) => DropdownMenuItem(
-                      value: m['id'] as String,
-                      child: Text(
-                        '${m['item_name']} (${m['item_code'] ?? 'N/A'})',
-                      ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (v) {
-                setState(() => _selectedMasterId = v);
-                _loadVariants();
-              },
-              decoration: _inputDecoration(
-                'Select Master Item',
-                Icons.inventory_2_rounded,
-                isDark,
-              ),
+        centerTitle: true,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [AppColors.primaryAmber, AppColors.primaryOrange],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
           ),
-
+        ),
+      ),
+      floatingActionButton: _selectedGroupId != null
+          ? FloatingActionButton.extended(
+              onPressed: () => _addOrEditVariant(),
+              backgroundColor: AppColors.primaryOrange,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add_rounded),
+              label: Text(
+                'Add Item',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+              ),
+            )
+          : null,
+      body: Column(
+        children: [
+          // Group selector
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedGroupId,
+                  isExpanded: true,
+                  items: _groups
+                      .map(
+                        (g) => DropdownMenuItem(
+                          value: g.id,
+                          child: Text(
+                            '${g.itemName} (${g.itemCode.isEmpty ? 'N/A' : g.itemCode})',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    setState(() {
+                      _selectedGroupId = v;
+                      _selectedGroup = _groups.firstWhere((g) => g.id == v);
+                      _variants = [];
+                      _searchController.clear();
+                      _searchQuery = '';
+                    });
+                    _loadVariants();
+                  },
+                  decoration: _inputDecoration(
+                    'Item Group',
+                    Icons.category_rounded,
+                    isDark,
+                  ),
+                ),
+                if (_selectedGroup != null) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryAmber.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: AppColors.primaryAmber.withValues(alpha: 0.25),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.info_outline_rounded,
+                          size: 15,
+                          color: AppColors.primaryOrange,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Group base rate ₹${_groupBaseRate.toStringAsFixed(0)} • '
+                            'items without an override inherit this price',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
+                              color: isDark
+                                  ? AppColors.textWhiteMuted
+                                  : AppColors.textDarkMuted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (_selectedGroupId != null && _variants.isNotEmpty)
+            _buildSearchBar(isDark),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : _selectedMasterId == null
-                ? _buildSelectPrompt(isDark)
+                : _selectedGroupId == null
+                ? _buildSelectPrompt()
                 : _variants.isEmpty
-                ? _buildEmptyState(isDark)
+                ? _buildEmptyState()
                 : _buildVariantList(isDark),
           ),
         ],
@@ -453,7 +684,52 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
     );
   }
 
-  Widget _buildSelectPrompt(bool isDark) {
+  Widget _buildSearchBar(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (v) => setState(() => _searchQuery = v),
+        style: GoogleFonts.inter(fontSize: 14),
+        decoration: InputDecoration(
+          hintText: 'Search selling items…',
+          hintStyle: GoogleFonts.inter(fontSize: 13, color: Colors.grey),
+          prefixIcon: const Icon(Icons.search_rounded, size: 20),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                )
+              : null,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          filled: true,
+          fillColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.primaryAmber),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectPrompt() {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -461,19 +737,20 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
           Icon(
             Icons.touch_app_rounded,
             size: 64,
-            color: Colors.grey.withOpacity(0.5),
+            color: Colors.grey.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
           Text(
-            'Select an item to manage its variants',
+            'Select an Item Group to manage its selling items',
             style: GoogleFonts.inter(color: Colors.grey),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildEmptyState(bool isDark) {
+  Widget _buildEmptyState() {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -481,18 +758,18 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
           Icon(
             Icons.layers_clear_rounded,
             size: 64,
-            color: Colors.grey.withOpacity(0.5),
+            color: Colors.grey.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
           Text(
-            'No variants for this item',
+            'No selling items in this group',
             style: GoogleFonts.inter(fontSize: 16),
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
-            onPressed: _addOrEditVariant,
+            onPressed: () => _addOrEditVariant(),
             icon: const Icon(Icons.add_rounded),
-            label: const Text('Add First Variant'),
+            label: const Text('Add First Selling Item'),
           ),
         ],
       ),
@@ -500,100 +777,317 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
   }
 
   Widget _buildVariantList(bool isDark) {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _variants.length,
-      itemBuilder: (context, index) {
-        final v = _variants[index];
-        final hsn = _hsns.firstWhere(
-          (h) => h['id'] == v.hsnId,
-          orElse: () => {},
-        );
+    final q = _searchQuery.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? _variants
+        : _variants
+              .where((v) => v.variantName.toLowerCase().contains(q))
+              .toList();
 
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          elevation: 0,
-          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+    if (filtered.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 48,
+              color: Colors.grey.withValues(alpha: 0.5),
             ),
-          ),
-          child: ListTile(
-            contentPadding: const EdgeInsets.all(12),
-            leading: Container(
-              width: 50,
-              height: 50,
-              decoration: BoxDecoration(
-                color: isDark ? AppColors.darkBg : AppColors.lightBg,
-                borderRadius: BorderRadius.circular(10),
-                image: v.imageUrl != null
-                    ? DecorationImage(
-                        image: NetworkImage(v.imageUrl!),
-                        fit: BoxFit.cover,
-                      )
-                    : null,
+            const SizedBox(height: 12),
+            Text(
+              'No matches for "$_searchQuery"',
+              style: GoogleFonts.inter(fontSize: 14, color: Colors.grey),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _loadVariants,
+      child: ListView.builder(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 90),
+        itemCount: filtered.length,
+        itemBuilder: (context, index) {
+          final v = filtered[index];
+          final hsn = _hsns.firstWhere(
+            (h) => h['id'] == v.hsnId,
+            orElse: () => {},
+          );
+          final effectiveRate =
+              _selectedGroup?.effectiveRateFor(v) ?? v.baseRate;
+          final inheriting = !v.hasPriceOverride;
+
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: v.isDefault
+                    ? AppColors.primaryAmber.withValues(alpha: 0.5)
+                    : (isDark ? AppColors.darkBorder : AppColors.lightBorder),
+                width: v.isDefault ? 1.5 : 1,
               ),
-              child: v.imageUrl == null
-                  ? const Icon(Icons.image_outlined, size: 20)
-                  : null,
             ),
-            title: Text(
-              v.variantName,
-              style: GoogleFonts.inter(fontWeight: FontWeight.w700),
-            ),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '₹${v.baseRate.toStringAsFixed(0)}${v.isRateInclusive ? ' (Inc)' : ''}',
-                  style: GoogleFonts.inter(color: AppColors.primaryAmber),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _addOrEditVariant(v),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Row(
+                  children: [
+                    // Thumbnail
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: AppColors.primaryAmber.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(9),
+                        image: v.imageUrl != null
+                            ? DecorationImage(
+                                image: NetworkImage(v.imageUrl!),
+                                fit: BoxFit.cover,
+                              )
+                            : null,
+                      ),
+                      child: v.imageUrl == null
+                          ? const Icon(
+                              Icons.fastfood_rounded,
+                              size: 18,
+                              color: AppColors.primaryAmber,
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 10),
+                    // Name + meta
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              _foodTypeDot(v.foodType),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  v.variantName,
+                                  style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13.5,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (v.isDefault) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primaryAmber,
+                                    borderRadius: BorderRadius.circular(5),
+                                  ),
+                                  child: Text(
+                                    'DEFAULT',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Text(
+                                '₹${effectiveRate.toStringAsFixed(0)}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.primaryOrange,
+                                ),
+                              ),
+                              if (inheriting)
+                                Text(
+                                  ' inherited',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontStyle: FontStyle.italic,
+                                    color: isDark
+                                        ? AppColors.textWhiteMuted
+                                        : AppColors.textDarkMuted,
+                                  ),
+                                ),
+                              if (hsn.isNotEmpty) ...[
+                                const SizedBox(width: 8),
+                                Text(
+                                  'HSN ${hsn['hsn_code']}',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    color: isDark
+                                        ? AppColors.textWhiteMuted
+                                        : AppColors.textDarkMuted,
+                                  ),
+                                ),
+                              ],
+                              if (!v.isActive) ...[
+                                const SizedBox(width: 6),
+                                _statusPill('Inactive', AppColors.error),
+                              ] else if (!v.isAvailable) ...[
+                                const SizedBox(width: 6),
+                                _statusPill('Unavailable', AppColors.warning),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Actions
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(),
+                      padding: const EdgeInsets.all(6),
+                      icon: const Icon(
+                        Icons.edit_rounded,
+                        size: 18,
+                        color: AppColors.info,
+                      ),
+                      onPressed: () => _addOrEditVariant(v),
+                    ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(),
+                      padding: const EdgeInsets.all(6),
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        size: 18,
+                        color: AppColors.error,
+                      ),
+                      onPressed: () => _deleteVariant(v),
+                    ),
+                  ],
                 ),
-                if (hsn.isNotEmpty)
-                  Text(
-                    'HSN: ${hsn['hsn_code']}',
-                    style: GoogleFonts.inter(fontSize: 10, color: Colors.grey),
-                  ),
-              ],
+              ),
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.edit_rounded, size: 20),
-                  onPressed: () => _addOrEditVariant(v),
-                ),
-                IconButton(
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    size: 20,
-                    color: AppColors.error,
-                  ),
-                  onPressed: () => _deleteVariant(v.id),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildField(
-    String label,
-    TextEditingController controller,
-    IconData icon,
-    bool isDark, {
-    TextInputType? keyboardType,
-    int maxLines = 1,
-  }) {
-    return TextFormField(
-      controller: controller,
-      keyboardType: keyboardType,
-      maxLines: maxLines,
-      decoration: _inputDecoration(label, icon, isDark),
-      style: GoogleFonts.inter(fontSize: 14),
+  Widget _statusPill(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 9,
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  static const List<Map<String, dynamic>> _foodTypes = [
+    {'value': 'veg', 'label': 'Veg', 'color': Colors.green},
+    {'value': 'egg', 'label': 'Egg', 'color': Colors.amber},
+    {'value': 'non-veg', 'label': 'Non-veg', 'color': Colors.red},
+  ];
+
+  Color _foodColor(String type) {
+    if (type == 'egg') return Colors.amber;
+    if (type == 'non-veg') return Colors.red;
+    return Colors.green;
+  }
+
+  Widget _foodTypeDot(String type) {
+    final color = _foodColor(type);
+    return Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        border: Border.all(color: color, width: 1.5),
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Center(
+        child: Container(
+          width: 6,
+          height: 6,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFoodTypeSelector(
+    String selected,
+    Function(String) onChanged,
+    bool isDark,
+  ) {
+    return Row(
+      children: _foodTypes.map((ft) {
+        final value = ft['value'] as String;
+        final label = ft['label'] as String;
+        final color = ft['color'] as Color;
+        final active = selected == value;
+        return Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => onChanged(value),
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: active
+                      ? color.withValues(alpha: 0.12)
+                      : (isDark ? AppColors.darkBg : AppColors.lightBg),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: active
+                        ? color
+                        : (isDark
+                              ? AppColors.darkBorder
+                              : AppColors.lightBorder),
+                    width: active ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _foodTypeDot(value),
+                    const SizedBox(width: 6),
+                    Text(
+                      label,
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                        color: active
+                            ? color
+                            : (isDark
+                                  ? AppColors.textWhiteMuted
+                                  : AppColors.textDarkMuted),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -606,7 +1100,8 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
     return SwitchListTile(
       title: Text(label, style: GoogleFonts.inter(fontSize: 13)),
       value: value,
-      activeColor: AppColors.primaryAmber,
+      activeThumbColor: AppColors.primaryAmber,
+      contentPadding: EdgeInsets.zero,
       onChanged: onChanged,
     );
   }
@@ -632,12 +1127,12 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
     );
   }
 
-  Future<void> _deleteVariant(String id) async {
+  Future<void> _deleteVariant(ItemVariant v) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete Variant?'),
-        content: const Text('This action cannot be undone.'),
+        title: const Text('Delete Selling Item?'),
+        content: Text('Delete "${v.variantName}"? This cannot be undone.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -655,12 +1150,23 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
     );
 
     if (confirm == true) {
-      await SupabaseService.deleteVariant(id);
-      await _loadVariants();
-      final user = ref.read(authStateProvider).value;
-      if (user != null) {
-        ref.invalidate(itemGroupsProvider(user.companyId));
-        ref.invalidate(allItemsProvider(user.companyId));
+      try {
+        await SupabaseService.deleteVariant(v.id);
+        // If we removed the default, promote the next sellable item.
+        if (v.isDefault) {
+          await _loadVariants();
+          final next = _variants.where((x) => x.isActive).toList();
+          if (next.isNotEmpty) {
+            await SupabaseService.setDefaultVariant(
+              itemId: _selectedGroupId!,
+              variantId: next.first.id,
+            );
+          }
+        }
+        await _loadVariants();
+        _invalidateGroup();
+      } catch (e) {
+        _showError('Delete failed: $e');
       }
     }
   }

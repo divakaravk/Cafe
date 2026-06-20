@@ -7,7 +7,23 @@
       "Bash(flutter analyze *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(claude mcp *)",
+      "Bash(curl *)",
+      "Bash(python -c \"import sys,json; rows=json.load\\(sys.stdin\\); [print\\(f\\\\\"{r['table_name']:<20} {r['column_name']:<25} {r['data_type']:<30} nullable={r['is_nullable']}\\\\\"\\) for r in rows]\")",
+      "Bash(Get-ChildItem -Path \"D:\\\\CafeNewPos\\\\Cafe\\\\lib\" -Recurse -Directory)",
+      "Bash(Select-Object FullName)",
+      "Bash(Sort-Object FullName)",
+      "PowerShell(\\(Get-Content \"D:\\\\CafeNewPos\\\\Cafe\\\\lib\\\\features\\\\orders\\\\tables_screen.dart\" | Measure-Object -Line\\).Lines)",
+      "Bash(python3 -c ' *)",
+      "Bash(supabase --version)",
+      "Bash(python -c \"import sys,json;d=json.load\\(sys.stdin\\);p=list\\(d['query']['pages'].values\\(\\)\\)[0];print\\(p['imageinfo'][0]['thumburl'] if 'imageinfo' in p else 'NONE'\\)\")",
+      "Bash(python *)",
+      "Bash(echo \"exit:$?\")",
+      "Bash(git check-ignore *)"
     ]
-  }
+  },
+  "disabledMcpjsonServers": [
+    "supabase"
+  ]
 }

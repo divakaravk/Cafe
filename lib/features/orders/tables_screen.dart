@@ -248,6 +248,23 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                         return _buildEmptyState(isDark);
                       }
 
+                      // Free tables float to the top (and blink to invite
+                      // seating); occupied tables sink to the bottom ordered by
+                      // how long they've been occupied (longest-seated first).
+                      final sortedTables = [...tables]..sort((a, b) {
+                        if (a.isOccupied != b.isOccupied) {
+                          return a.isOccupied ? 1 : -1;
+                        }
+                        if (a.isOccupied && b.isOccupied) {
+                          final ta = a.occupiedSince;
+                          final tb = b.occupiedSince;
+                          if (ta != null && tb != null) return ta.compareTo(tb);
+                          if (ta != null) return -1;
+                          if (tb != null) return 1;
+                        }
+                        return _naturalTableCompare(a.tableNumber, b.tableNumber);
+                      });
+
                       return GridView.builder(
                         padding: EdgeInsets.all(isTablet ? 20 : 8),
                         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -256,9 +273,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                           crossAxisSpacing: isTablet ? 16 : 8,
                           mainAxisSpacing: isTablet ? 16 : 8,
                         ),
-                        itemCount: tables.length,
+                        itemCount: sortedTables.length,
                         itemBuilder: (context, index) {
-                          final table = tables[index];
+                          final table = sortedTables[index];
                           final isSelected = _selectedTable?.id == table.id;
 
                           return _TableCard(
@@ -453,6 +470,14 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   Color _coverAccent(int? coverNumber) {
     if (coverNumber == null) return Colors.grey;
     return _kCoverColors[(coverNumber - 1) % _kCoverColors.length];
+  }
+
+  /// Compares table numbers so "T2" sorts before "T10" (numeric-aware).
+  int _naturalTableCompare(String a, String b) {
+    final na = int.tryParse(a.replaceAll(RegExp(r'[^0-9]'), ''));
+    final nb = int.tryParse(b.replaceAll(RegExp(r'[^0-9]'), ''));
+    if (na != null && nb != null && na != nb) return na.compareTo(nb);
+    return a.toLowerCase().compareTo(b.toLowerCase());
   }
 
   void _refreshOrderSummary() {
@@ -2995,7 +3020,7 @@ class _TableCard extends ConsumerWidget {
     final statusBgColor = _statusBgColor(status);
     final statusColor = _statusColor(status);
 
-    return Material(
+    final Widget card = Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
@@ -3062,8 +3087,12 @@ class _TableCard extends ConsumerWidget {
                           isTablet,
                         ),
                         const Spacer(),
-                        // Status Badge
-                        Container(
+                        // Status badge + how long the table has been occupied
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
                           padding: EdgeInsets.symmetric(
                             horizontal: isTablet ? 14 : 6,
                             vertical: isTablet ? 7 : 3,
@@ -3102,6 +3131,13 @@ class _TableCard extends ConsumerWidget {
                               ),
                             ],
                           ),
+                            ),
+                            if (table.isOccupied &&
+                                table.occupiedSince != null) ...[
+                              SizedBox(height: isTablet ? 6 : 4),
+                              _buildElapsedChip(table.occupiedSince!, isTablet),
+                            ],
+                          ],
                         ),
                       ],
                     ),
@@ -3177,7 +3213,53 @@ class _TableCard extends ConsumerWidget {
         ),
       ),
     );
+
+    // Available tables gently blink (pulse + soft fade) to invite seating.
+    if (status == 'FREE') {
+      return card
+          .animate(onPlay: (c) => c.repeat(reverse: true))
+          .fadeIn(begin: 0.6, duration: 900.ms, curve: Curves.easeInOut)
+          .scaleXY(begin: 1.0, end: 1.02, duration: 900.ms, curve: Curves.easeInOut);
+    }
+    return card;
   }
+}
+
+String _elapsedLabel(DateTime since) {
+  final d = DateTime.now().difference(since);
+  if (d.isNegative || d.inMinutes < 1) return 'just now';
+  if (d.inMinutes < 60) return '${d.inMinutes}m';
+  final h = d.inHours;
+  final m = d.inMinutes % 60;
+  return m == 0 ? '${h}h' : '${h}h ${m}m';
+}
+
+Widget _buildElapsedChip(DateTime since, bool isTablet) {
+  return Container(
+    padding: EdgeInsets.symmetric(
+      horizontal: isTablet ? 8 : 5,
+      vertical: isTablet ? 3 : 1.5,
+    ),
+    decoration: BoxDecoration(
+      color: AppColors.error.withValues(alpha: 0.1),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.schedule_rounded, size: isTablet ? 11 : 9, color: AppColors.error),
+        const SizedBox(width: 3),
+        Text(
+          _elapsedLabel(since),
+          style: GoogleFonts.inter(
+            fontSize: isTablet ? 10 : 8,
+            fontWeight: FontWeight.w700,
+            color: AppColors.error,
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 Widget _buildSeparator(bool isDark, bool isTablet) {

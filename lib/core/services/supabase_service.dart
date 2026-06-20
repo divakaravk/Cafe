@@ -179,7 +179,9 @@ class SupabaseService {
   ) async {
     final res = await client
         .from('item_master')
-        .select('*, company_hsn(*), item_variant(*, company_hsn(*))')
+        .select(
+          '*, company_hsn(*), item_variant!item_variant_item_id_fkey(*, company_hsn(*))',
+        )
         .eq('company_id', companyId)
         .order('display_order');
     return List<Map<String, dynamic>>.from(res);
@@ -212,12 +214,90 @@ class SupabaseService {
     await client.from('item_master').delete().eq('id', id);
   }
 
+  /// Returns the selling items (variants) for a single group, sorted by
+  /// display_order then name. Pass [onlySellable] for the POS (active +
+  /// available only). Lazy-load entry point — used when variants are not
+  /// already embedded in the group payload.
+  static Future<List<Map<String, dynamic>>> getVariantsByGroup(
+    String itemId, {
+    bool onlySellable = false,
+  }) async {
+    var query = client
+        .from('item_variant')
+        .select('*, company_hsn(*)')
+        .eq('item_id', itemId);
+    if (onlySellable) {
+      query = query.eq('is_active', true).eq('is_available', true);
+    }
+    final res = await query
+        .order('display_order', ascending: true)
+        .order('variant_name', ascending: true);
+    return List<Map<String, dynamic>>.from(res);
+  }
+
+  /// Returns the default selling item for a group, or null if none.
+  static Future<Map<String, dynamic>?> getDefaultVariant(String itemId) async {
+    final flagged = await client
+        .from('item_variant')
+        .select('*, company_hsn(*)')
+        .eq('item_id', itemId)
+        .eq('is_default', true)
+        .limit(1);
+    if ((flagged as List).isNotEmpty) {
+      return Map<String, dynamic>.from(flagged.first as Map);
+    }
+    final first = await client
+        .from('item_variant')
+        .select('*, company_hsn(*)')
+        .eq('item_id', itemId)
+        .order('display_order', ascending: true)
+        .order('variant_name', ascending: true)
+        .limit(1);
+    return (first as List).isNotEmpty
+        ? Map<String, dynamic>.from(first.first as Map)
+        : null;
+  }
+
+  /// Pricing rule, server-friendly form: a variant's override rate
+  /// (null/0) inherits the group base rate; otherwise it overrides.
+  /// UI must call this (or [Item.effectiveRateFor]) — never recompute.
+  static double getEffectiveRate({
+    required double groupBaseRate,
+    double? variantOverrideRate,
+  }) {
+    final override = variantOverrideRate ?? 0;
+    return override > 0 ? override : groupBaseRate;
+  }
+
+  /// Marks [variantId] as the single default selling item for its group and
+  /// syncs the group's default_variant_id pointer. Atomic-ish: clears the
+  /// flag on siblings first.
+  static Future<void> setDefaultVariant({
+    required String itemId,
+    required String variantId,
+  }) async {
+    await client
+        .from('item_variant')
+        .update({'is_default': false})
+        .eq('item_id', itemId);
+    await client
+        .from('item_variant')
+        .update({'is_default': true})
+        .eq('id', variantId);
+    await client
+        .from('item_master')
+        .update({'default_variant_id': variantId})
+        .eq('id', itemId);
+  }
+
   static Future<List<Map<String, dynamic>>> getAllItems(
     String companyId,
   ) async {
     final res = await client
         .from('item_master')
-        .select('*, company_hsn(*), item_variant(*, company_hsn(*))')
+        .select(
+          '*, company_hsn(*), item_variant!item_variant_item_id_fkey(*, company_hsn(*))',
+        )
         .eq('company_id', companyId)
         .order('item_name');
     return List<Map<String, dynamic>>.from(res);
@@ -234,19 +314,15 @@ class SupabaseService {
     await client.from('item_variant').delete().eq('item_id', itemData['id']);
 
     if (variants.isNotEmpty) {
-      final variantsToSave = variants.map((v) {
-        final map = {...v, 'item_id': itemData['id']};
-        map.remove('food_type'); // Safeguard against schema mismatch
-        return map;
-      }).toList();
+      final variantsToSave = variants
+          .map((v) => {...v, 'item_id': itemData['id']})
+          .toList();
       await client.from('item_variant').insert(variantsToSave);
     }
   }
 
   static Future<void> upsertVariant(Map<String, dynamic> data) async {
-    final cleanData = {...data};
-    cleanData.remove('food_type'); // Safeguard against schema mismatch
-    await client.from('item_variant').upsert(cleanData);
+    await client.from('item_variant').upsert(data);
   }
 
   static Future<void> deleteVariant(String variantId) async {
@@ -288,13 +364,18 @@ class SupabaseService {
     // Fetch open sessions to determine occupancy and map tableId -> sessionId
     final openSessions = await client
         .from('table_session')
-        .select('table_id, id')
+        .select('table_id, id, opened_at')
         .eq('company_id', companyId)
         .eq('status', 'open');
 
     final sessionMap = <String, String>{};
+    final sessionOpenedMap = <String, String>{};
     for (final s in openSessions as List) {
-      sessionMap[s['table_id'] as String] = s['id'] as String;
+      final tid = s['table_id'] as String;
+      sessionMap[tid] = s['id'] as String;
+      if (s['opened_at'] != null) {
+        sessionOpenedMap[tid] = s['opened_at'] as String;
+      }
     }
 
     // Fetch open bill totals + cover counts for all occupied sessions in parallel
@@ -334,10 +415,64 @@ class SupabaseService {
       final sessionId = sessionMap[tableId];
       map['is_occupied'] = sessionId != null;
       map['active_session_id'] = sessionId;
+      map['occupied_since'] = sessionOpenedMap[tableId];
       map['active_order_total'] = sessionId != null ? (sessionTotals[sessionId] ?? 0.0) : 0.0;
       map['active_cover_count'] = sessionId != null ? (coverCounts[sessionId] ?? 0) : 0;
       return map;
     }).toList();
+  }
+
+  // ─── TABLE MASTER (CRUD) ───────────────────────────────
+  /// Creates a new dining table. [tableNumber] should be unique per company.
+  static Future<void> createTable({
+    required String companyId,
+    required String tableNumber,
+    String? section,
+    required int seatingCapacity,
+    bool isActive = true,
+  }) async {
+    await client.from('table_master').insert({
+      'company_id': companyId,
+      'table_number': tableNumber,
+      'section': (section == null || section.trim().isEmpty)
+          ? 'Main'
+          : section.trim(),
+      'seating_capacity': seatingCapacity,
+      'is_active': isActive,
+    });
+  }
+
+  /// Updates an existing dining table's layout fields.
+  static Future<void> updateTable({
+    required String id,
+    required String tableNumber,
+    String? section,
+    required int seatingCapacity,
+    required bool isActive,
+  }) async {
+    await client
+        .from('table_master')
+        .update({
+          'table_number': tableNumber,
+          'section': (section == null || section.trim().isEmpty)
+              ? 'Main'
+              : section.trim(),
+          'seating_capacity': seatingCapacity,
+          'is_active': isActive,
+        })
+        .eq('id', id);
+  }
+
+  /// Whether a table currently has an open session (is occupied right now).
+  /// Used to block edits on tables that are mid-service.
+  static Future<bool> isTableOccupied(String tableId) async {
+    final res = await client
+        .from('table_session')
+        .select('id')
+        .eq('table_id', tableId)
+        .eq('status', 'open')
+        .limit(1);
+    return (res as List).isNotEmpty;
   }
 
   // ─── TABLE COVERS ──────────────────────────────────────
@@ -352,7 +487,7 @@ class SupabaseService {
     return List<Map<String, dynamic>>.from(res);
   }
 
-  /// Returns Map<coverId, total> for all open bills under a session
+  /// Returns a `Map<coverId, total>` for all open bills under a session
   static Future<Map<String, double>> getCoverTotals(String sessionId) async {
     final bills = await client
         .from('bill_master')

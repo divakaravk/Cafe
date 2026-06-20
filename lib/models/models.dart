@@ -7,6 +7,7 @@ class Company {
   final bool hasGst;
   final bool hasTableManagement;
   final bool hasItemVariants;
+  final bool showItemImages;
   final bool isActive;
   final DateTime? createdAt;
 
@@ -17,6 +18,7 @@ class Company {
     this.hasGst = false,
     this.hasTableManagement = true,
     this.hasItemVariants = false,
+    this.showItemImages = true,
     this.isActive = true,
     this.createdAt,
   });
@@ -28,6 +30,7 @@ class Company {
     hasGst: json['has_gst'] as bool? ?? false,
     hasTableManagement: json['has_table_management'] as bool? ?? true,
     hasItemVariants: json['has_item_variants'] as bool? ?? false,
+    showItemImages: json['show_item_images'] as bool? ?? true,
     isActive: json['is_active'] as bool? ?? true,
     createdAt: json['created_at'] != null
         ? DateTime.parse(json['created_at'] as String)
@@ -40,6 +43,7 @@ class Company {
     'has_gst': hasGst,
     'has_table_management': hasTableManagement,
     'has_item_variants': hasItemVariants,
+    'show_item_images': showItemImages,
     'is_active': isActive,
   };
 }
@@ -133,6 +137,7 @@ class UserPermission {
   final bool canManageUsers;
   final bool canManageSettings;
   final bool canVoidItems;
+  final bool canManageStock; // Inventory / Stock module (future-ready)
 
   UserPermission({
     required this.userId,
@@ -147,6 +152,7 @@ class UserPermission {
     this.canManageUsers = false,
     this.canManageSettings = false,
     this.canVoidItems = false,
+    this.canManageStock = false,
   });
 
   factory UserPermission.fromJson(Map<String, dynamic> json) => UserPermission(
@@ -162,6 +168,7 @@ class UserPermission {
     canManageUsers: json['can_manage_users'] as bool? ?? false,
     canManageSettings: json['can_manage_settings'] as bool? ?? false,
     canVoidItems: json['can_void_items'] as bool? ?? false,
+    canManageStock: json['can_manage_stock'] as bool? ?? false,
   );
 
   Map<String, dynamic> toJson() => {
@@ -177,11 +184,79 @@ class UserPermission {
     'can_manage_users': canManageUsers,
     'can_manage_settings': canManageSettings,
     'can_void_items': canVoidItems,
+    'can_manage_stock': canManageStock,
   };
+
+  /// Full access — used for admins, who bypass per-module gating.
+  factory UserPermission.all(String userId) => UserPermission(
+    userId: userId,
+    canViewDashboard: true,
+    canCreateBill: true,
+    canEditBill: true,
+    canCancelBill: true,
+    canApplyDiscount: true,
+    canManageItems: true,
+    canManageTables: true,
+    canViewReports: true,
+    canManageUsers: true,
+    canManageSettings: true,
+    canVoidItems: true,
+    canManageStock: true,
+  );
+
+  /// Sensible default access for a role, used when no explicit permission row
+  /// exists yet. Mirrors how Petpooja seeds module access per staff role.
+  factory UserPermission.forRole(String userId, String role) {
+    switch (role.toLowerCase()) {
+      case 'admin':
+        return UserPermission.all(userId);
+      case 'manager':
+        return UserPermission(
+          userId: userId,
+          canViewDashboard: true,
+          canCreateBill: true,
+          canEditBill: true,
+          canCancelBill: true,
+          canApplyDiscount: true,
+          canManageItems: true,
+          canManageTables: true,
+          canViewReports: true,
+          canVoidItems: true,
+          canManageStock: true,
+        );
+      case 'cashier':
+        return UserPermission(
+          userId: userId,
+          canCreateBill: true,
+          canApplyDiscount: true,
+          canManageTables: true,
+          canViewReports: true,
+        );
+      case 'waiter':
+        return UserPermission(
+          userId: userId,
+          canCreateBill: true,
+          canManageTables: true,
+        );
+      case 'kitchen':
+        return UserPermission(
+          userId: userId,
+          canCreateBill: false,
+          canManageTables: true,
+        );
+      default:
+        return UserPermission(userId: userId, canCreateBill: true);
+    }
+  }
 }
 
-/// Menu item model
-// 4. ITEM_MASTER
+/// Item Group model (table: item_master).
+///
+/// In the enterprise model an Item Group (e.g. "Dosa", "Rice") is never sold
+/// directly — only its [variants] (the actual selling items) can be billed.
+/// The group carries a [baseRate] which variants inherit when they do not
+/// override it. See [effectiveRateFor] for the single source of pricing truth.
+// 4. ITEM_MASTER  (= ITEM GROUP)
 class Item {
   final String id;
   final String companyId;
@@ -201,6 +276,7 @@ class Item {
   final String? sectionLabel;
   final String? colorTag;
   final String foodType; // 'veg', 'egg', 'non-veg'
+  final String? defaultVariantId;
   final DateTime? createdAt;
   final List<ItemVariant> variants;
   final String? hsnCode;
@@ -208,6 +284,32 @@ class Item {
   final double cgstRate;
   final double sgstRate;
   final double igstRate;
+
+  // ─── Future-ready columns (mapped, not yet surfaced in UI) ─────────────
+  final String? shortName;
+  final String? localName;
+  final String? searchKeywords;
+  final String? printName;
+  final String? kitchenName;
+  final String? badge;
+  final bool isFeatured;
+  final bool isRecommended;
+  final int? preparationTime;
+  final String? barcode;
+  final String? sku;
+  final bool stockEnabled;
+  final bool unlimitedStock;
+  final double packingCharge;
+  final double serviceCharge;
+  final bool onlineVisible;
+  final bool qrVisible;
+  final bool selfOrderVisible;
+  final bool dineInAvailable;
+  final bool takeawayAvailable;
+  final bool deliveryAvailable;
+  final DateTime? updatedAt;
+  final String? updatedBy;
+  final int syncVersion;
 
   Item({
     required this.id,
@@ -228,6 +330,7 @@ class Item {
     this.sectionLabel,
     this.colorTag,
     this.foodType = 'veg',
+    this.defaultVariantId,
     this.createdAt,
     this.variants = const [],
     this.hsnCode,
@@ -235,12 +338,74 @@ class Item {
     this.cgstRate = 0,
     this.sgstRate = 0,
     this.igstRate = 0,
+    this.shortName,
+    this.localName,
+    this.searchKeywords,
+    this.printName,
+    this.kitchenName,
+    this.badge,
+    this.isFeatured = false,
+    this.isRecommended = false,
+    this.preparationTime,
+    this.barcode,
+    this.sku,
+    this.stockEnabled = false,
+    this.unlimitedStock = true,
+    this.packingCharge = 0,
+    this.serviceCharge = 0,
+    this.onlineVisible = true,
+    this.qrVisible = true,
+    this.selfOrderVisible = true,
+    this.dineInAvailable = true,
+    this.takeawayAvailable = true,
+    this.deliveryAvailable = true,
+    this.updatedAt,
+    this.updatedBy,
+    this.syncVersion = 0,
   });
 
   // Compatibility getters
   double get rate => baseRate;
   bool get taxable => isTaxable;
   bool get isAvailable => isActive;
+
+  /// Selling items belonging to this group that are sellable in the POS:
+  /// active AND available, sorted by display order then name.
+  List<ItemVariant> get sellableVariants {
+    final list = variants.where((v) => v.isActive && v.isAvailable).toList()
+      ..sort((a, b) {
+        final byOrder = a.displayOrder.compareTo(b.displayOrder);
+        return byOrder != 0
+            ? byOrder
+            : a.variantName.toLowerCase().compareTo(b.variantName.toLowerCase());
+      });
+    return list;
+  }
+
+  /// The default selling item for this group (explicit flag → group pointer →
+  /// first sellable variant → first variant). Never returns null when the
+  /// group has at least one variant.
+  ItemVariant? get defaultVariant {
+    if (variants.isEmpty) return null;
+    for (final v in variants) {
+      if (v.isDefault) return v;
+    }
+    if (defaultVariantId != null) {
+      for (final v in variants) {
+        if (v.id == defaultVariantId) return v;
+      }
+    }
+    final sellable = sellableVariants;
+    return sellable.isNotEmpty ? sellable.first : variants.first;
+  }
+
+  /// SINGLE SOURCE OF PRICING TRUTH.
+  /// A variant inherits the group [baseRate] when it has no override
+  /// (override rate is null or 0); otherwise the variant rate wins.
+  double effectiveRateFor(ItemVariant? variant) {
+    if (variant == null) return baseRate;
+    return variant.hasPriceOverride ? variant.baseRate : baseRate;
+  }
 
   factory Item.fromJson(Map<String, dynamic> json) => Item(
     id: json['id'] as String,
@@ -261,6 +426,7 @@ class Item {
     sectionLabel: json['section_label'] as String?,
     colorTag: json['color_tag'] as String?,
     foodType: json['food_type'] as String? ?? 'veg',
+    defaultVariantId: json['default_variant_id'] as String?,
     createdAt: json['created_at'] != null
         ? DateTime.parse(json['created_at'] as String)
         : null,
@@ -284,6 +450,32 @@ class Item {
     igstRate: json['company_hsn'] != null
         ? (json['company_hsn']['igst_rate'] as num?)?.toDouble() ?? 0
         : 0,
+    shortName: json['short_name'] as String?,
+    localName: json['local_name'] as String?,
+    searchKeywords: json['search_keywords'] as String?,
+    printName: json['print_name'] as String?,
+    kitchenName: json['kitchen_name'] as String?,
+    badge: json['badge'] as String?,
+    isFeatured: json['is_featured'] as bool? ?? false,
+    isRecommended: json['is_recommended'] as bool? ?? false,
+    preparationTime: json['preparation_time'] as int?,
+    barcode: json['barcode'] as String?,
+    sku: json['sku'] as String?,
+    stockEnabled: json['stock_enabled'] as bool? ?? false,
+    unlimitedStock: json['unlimited_stock'] as bool? ?? true,
+    packingCharge: (json['packing_charge'] as num?)?.toDouble() ?? 0,
+    serviceCharge: (json['service_charge'] as num?)?.toDouble() ?? 0,
+    onlineVisible: json['online_visible'] as bool? ?? true,
+    qrVisible: json['qr_visible'] as bool? ?? true,
+    selfOrderVisible: json['self_order_visible'] as bool? ?? true,
+    dineInAvailable: json['dine_in_available'] as bool? ?? true,
+    takeawayAvailable: json['takeaway_available'] as bool? ?? true,
+    deliveryAvailable: json['delivery_available'] as bool? ?? true,
+    updatedAt: json['updated_at'] != null
+        ? DateTime.tryParse(json['updated_at'] as String)
+        : null,
+    updatedBy: json['updated_by'] as String?,
+    syncVersion: json['sync_version'] as int? ?? 0,
   );
 
   Map<String, dynamic> toJson() => {
@@ -305,9 +497,112 @@ class Item {
     'section_label': sectionLabel,
     'color_tag': colorTag,
     'food_type': foodType,
+    'default_variant_id': defaultVariantId,
   };
+
+  Item copyWith({
+    String? id,
+    String? companyId,
+    String? hsnId,
+    String? itemCode,
+    String? itemName,
+    String? description,
+    String? unitOfMeasure,
+    double? baseRate,
+    bool? hasVariants,
+    bool? isTaxable,
+    bool? isActive,
+    String? imageUrl,
+    int? displayOrder,
+    double? inclusiveRate,
+    bool? isRateInclusive,
+    String? sectionLabel,
+    String? colorTag,
+    String? foodType,
+    String? defaultVariantId,
+    DateTime? createdAt,
+    List<ItemVariant>? variants,
+    String? hsnCode,
+    double? gstRate,
+    double? cgstRate,
+    double? sgstRate,
+    double? igstRate,
+  }) => Item(
+    id: id ?? this.id,
+    companyId: companyId ?? this.companyId,
+    hsnId: hsnId ?? this.hsnId,
+    itemCode: itemCode ?? this.itemCode,
+    itemName: itemName ?? this.itemName,
+    description: description ?? this.description,
+    unitOfMeasure: unitOfMeasure ?? this.unitOfMeasure,
+    baseRate: baseRate ?? this.baseRate,
+    hasVariants: hasVariants ?? this.hasVariants,
+    isTaxable: isTaxable ?? this.isTaxable,
+    isActive: isActive ?? this.isActive,
+    imageUrl: imageUrl ?? this.imageUrl,
+    displayOrder: displayOrder ?? this.displayOrder,
+    inclusiveRate: inclusiveRate ?? this.inclusiveRate,
+    isRateInclusive: isRateInclusive ?? this.isRateInclusive,
+    sectionLabel: sectionLabel ?? this.sectionLabel,
+    colorTag: colorTag ?? this.colorTag,
+    foodType: foodType ?? this.foodType,
+    defaultVariantId: defaultVariantId ?? this.defaultVariantId,
+    createdAt: createdAt ?? this.createdAt,
+    variants: variants ?? this.variants,
+    hsnCode: hsnCode ?? this.hsnCode,
+    gstRate: gstRate ?? this.gstRate,
+    cgstRate: cgstRate ?? this.cgstRate,
+    sgstRate: sgstRate ?? this.sgstRate,
+    igstRate: igstRate ?? this.igstRate,
+    shortName: shortName,
+    localName: localName,
+    searchKeywords: searchKeywords,
+    printName: printName,
+    kitchenName: kitchenName,
+    badge: badge,
+    isFeatured: isFeatured,
+    isRecommended: isRecommended,
+    preparationTime: preparationTime,
+    barcode: barcode,
+    sku: sku,
+    stockEnabled: stockEnabled,
+    unlimitedStock: unlimitedStock,
+    packingCharge: packingCharge,
+    serviceCharge: serviceCharge,
+    onlineVisible: onlineVisible,
+    qrVisible: qrVisible,
+    selfOrderVisible: selfOrderVisible,
+    dineInAvailable: dineInAvailable,
+    takeawayAvailable: takeawayAvailable,
+    deliveryAvailable: deliveryAvailable,
+    updatedAt: updatedAt,
+    updatedBy: updatedBy,
+    syncVersion: syncVersion,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Item &&
+          other.id == id &&
+          other.itemName == itemName &&
+          other.baseRate == baseRate &&
+          other.isActive == isActive &&
+          other.displayOrder == displayOrder &&
+          other.updatedAt == updatedAt &&
+          other.syncVersion == syncVersion &&
+          other.variants.length == variants.length);
+
+  @override
+  int get hashCode => Object.hash(id, itemName, baseRate, isActive,
+      displayOrder, updatedAt, syncVersion, variants.length);
 }
 
+/// Selling item belonging to an [Item] group (table: item_variant).
+///
+/// This is the only sellable entity. [baseRate] is an OPTIONAL override of the
+/// group rate — a value of 0 means "inherit the group base rate" (resolved by
+/// [Item.effectiveRateFor]).
 class ItemVariant {
   final String id;
   final String itemId;
@@ -321,11 +616,39 @@ class ItemVariant {
   final String? description;
   final int displayOrder;
   final bool isAvailable;
+  final bool isDefault;
+  final String foodType; // 'veg', 'egg', 'non-veg' — per selling item
   final String? hsnCode;
   final double gstRate;
   final double cgstRate;
   final double sgstRate;
   final double igstRate;
+
+  // ─── Future-ready columns (mapped, not yet surfaced in UI) ─────────────
+  final String? shortName;
+  final String? localName;
+  final String? searchKeywords;
+  final String? printName;
+  final String? kitchenName;
+  final String? badge;
+  final bool isFeatured;
+  final bool isRecommended;
+  final int? preparationTime;
+  final String? barcode;
+  final String? sku;
+  final bool stockEnabled;
+  final bool unlimitedStock;
+  final double packingCharge;
+  final double serviceCharge;
+  final bool onlineVisible;
+  final bool qrVisible;
+  final bool selfOrderVisible;
+  final bool dineInAvailable;
+  final bool takeawayAvailable;
+  final bool deliveryAvailable;
+  final DateTime? updatedAt;
+  final String? updatedBy;
+  final int syncVersion;
 
   ItemVariant({
     required this.id,
@@ -340,14 +663,48 @@ class ItemVariant {
     this.description,
     this.displayOrder = 0,
     this.isAvailable = true,
+    this.isDefault = false,
+    this.foodType = 'veg',
     this.hsnCode,
     this.gstRate = 0,
     this.cgstRate = 0,
     this.sgstRate = 0,
     this.igstRate = 0,
+    this.shortName,
+    this.localName,
+    this.searchKeywords,
+    this.printName,
+    this.kitchenName,
+    this.badge,
+    this.isFeatured = false,
+    this.isRecommended = false,
+    this.preparationTime,
+    this.barcode,
+    this.sku,
+    this.stockEnabled = false,
+    this.unlimitedStock = true,
+    this.packingCharge = 0,
+    this.serviceCharge = 0,
+    this.onlineVisible = true,
+    this.qrVisible = true,
+    this.selfOrderVisible = true,
+    this.dineInAvailable = true,
+    this.takeawayAvailable = true,
+    this.deliveryAvailable = true,
+    this.updatedAt,
+    this.updatedBy,
+    this.syncVersion = 0,
   });
 
   double get rate => baseRate;
+
+  /// True when this variant defines its own price (overrides the group rate).
+  /// A null/0 stored value means "inherit the group base rate".
+  bool get hasPriceOverride => baseRate > 0;
+
+  /// Whether the variant name is the implicit single "Default" selling item,
+  /// which the POS renders using the group name instead of the variant name.
+  bool get isDefaultName => variantName.trim().toLowerCase() == 'default';
 
   factory ItemVariant.fromJson(Map<String, dynamic> json) => ItemVariant(
     id: json['id'] as String,
@@ -362,6 +719,8 @@ class ItemVariant {
     description: json['description'] as String?,
     displayOrder: json['display_order'] as int? ?? 0,
     isAvailable: json['is_available'] as bool? ?? true,
+    isDefault: json['is_default'] as bool? ?? false,
+    foodType: json['food_type'] as String? ?? 'veg',
     hsnCode: json['company_hsn'] != null
         ? json['company_hsn']['hsn_code'] as String?
         : null,
@@ -377,6 +736,32 @@ class ItemVariant {
     igstRate: json['company_hsn'] != null
         ? (json['company_hsn']['igst_rate'] as num?)?.toDouble() ?? 0
         : 0,
+    shortName: json['short_name'] as String?,
+    localName: json['local_name'] as String?,
+    searchKeywords: json['search_keywords'] as String?,
+    printName: json['print_name'] as String?,
+    kitchenName: json['kitchen_name'] as String?,
+    badge: json['badge'] as String?,
+    isFeatured: json['is_featured'] as bool? ?? false,
+    isRecommended: json['is_recommended'] as bool? ?? false,
+    preparationTime: json['preparation_time'] as int?,
+    barcode: json['barcode'] as String?,
+    sku: json['sku'] as String?,
+    stockEnabled: json['stock_enabled'] as bool? ?? false,
+    unlimitedStock: json['unlimited_stock'] as bool? ?? true,
+    packingCharge: (json['packing_charge'] as num?)?.toDouble() ?? 0,
+    serviceCharge: (json['service_charge'] as num?)?.toDouble() ?? 0,
+    onlineVisible: json['online_visible'] as bool? ?? true,
+    qrVisible: json['qr_visible'] as bool? ?? true,
+    selfOrderVisible: json['self_order_visible'] as bool? ?? true,
+    dineInAvailable: json['dine_in_available'] as bool? ?? true,
+    takeawayAvailable: json['takeaway_available'] as bool? ?? true,
+    deliveryAvailable: json['delivery_available'] as bool? ?? true,
+    updatedAt: json['updated_at'] != null
+        ? DateTime.tryParse(json['updated_at'] as String)
+        : null,
+    updatedBy: json['updated_by'] as String?,
+    syncVersion: json['sync_version'] as int? ?? 0,
   );
 
   Map<String, dynamic> toJson() => {
@@ -392,7 +777,93 @@ class ItemVariant {
     'description': description,
     'display_order': displayOrder,
     'is_available': isAvailable,
+    'is_default': isDefault,
+    'food_type': foodType,
   };
+
+  ItemVariant copyWith({
+    String? id,
+    String? itemId,
+    String? variantName,
+    double? baseRate,
+    bool? isActive,
+    String? imageUrl,
+    String? hsnId,
+    double? inclusiveRate,
+    bool? isRateInclusive,
+    String? description,
+    int? displayOrder,
+    bool? isAvailable,
+    bool? isDefault,
+    String? foodType,
+    String? hsnCode,
+    double? gstRate,
+    double? cgstRate,
+    double? sgstRate,
+    double? igstRate,
+  }) => ItemVariant(
+    id: id ?? this.id,
+    itemId: itemId ?? this.itemId,
+    variantName: variantName ?? this.variantName,
+    baseRate: baseRate ?? this.baseRate,
+    isActive: isActive ?? this.isActive,
+    imageUrl: imageUrl ?? this.imageUrl,
+    hsnId: hsnId ?? this.hsnId,
+    inclusiveRate: inclusiveRate ?? this.inclusiveRate,
+    isRateInclusive: isRateInclusive ?? this.isRateInclusive,
+    description: description ?? this.description,
+    displayOrder: displayOrder ?? this.displayOrder,
+    isAvailable: isAvailable ?? this.isAvailable,
+    isDefault: isDefault ?? this.isDefault,
+    foodType: foodType ?? this.foodType,
+    hsnCode: hsnCode ?? this.hsnCode,
+    gstRate: gstRate ?? this.gstRate,
+    cgstRate: cgstRate ?? this.cgstRate,
+    sgstRate: sgstRate ?? this.sgstRate,
+    igstRate: igstRate ?? this.igstRate,
+    shortName: shortName,
+    localName: localName,
+    searchKeywords: searchKeywords,
+    printName: printName,
+    kitchenName: kitchenName,
+    badge: badge,
+    isFeatured: isFeatured,
+    isRecommended: isRecommended,
+    preparationTime: preparationTime,
+    barcode: barcode,
+    sku: sku,
+    stockEnabled: stockEnabled,
+    unlimitedStock: unlimitedStock,
+    packingCharge: packingCharge,
+    serviceCharge: serviceCharge,
+    onlineVisible: onlineVisible,
+    qrVisible: qrVisible,
+    selfOrderVisible: selfOrderVisible,
+    dineInAvailable: dineInAvailable,
+    takeawayAvailable: takeawayAvailable,
+    deliveryAvailable: deliveryAvailable,
+    updatedAt: updatedAt,
+    updatedBy: updatedBy,
+    syncVersion: syncVersion,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ItemVariant &&
+          other.id == id &&
+          other.variantName == variantName &&
+          other.baseRate == baseRate &&
+          other.isActive == isActive &&
+          other.isAvailable == isAvailable &&
+          other.isDefault == isDefault &&
+          other.displayOrder == displayOrder &&
+          other.updatedAt == updatedAt &&
+          other.syncVersion == syncVersion);
+
+  @override
+  int get hashCode => Object.hash(id, variantName, baseRate, isActive,
+      isAvailable, isDefault, displayOrder, updatedAt, syncVersion);
 }
 
 /// Cafe table model
@@ -418,6 +889,7 @@ class CafeTable {
     this.activeOrderTotal = 0.0,
     this.activeSessionId,
     this.activeCoverCount = 0,
+    this.occupiedSince,
   });
 
   String get tableName => tableNumber;
@@ -426,6 +898,10 @@ class CafeTable {
 
   final String? activeSessionId;
   final int activeCoverCount;
+
+  /// When the active session was opened (used to sort/show how long the table
+  /// has been occupied). Null when the table is free.
+  final DateTime? occupiedSince;
 
   factory CafeTable.fromJson(Map<String, dynamic> json) => CafeTable(
     id: json['id'] as String,
@@ -438,6 +914,9 @@ class CafeTable {
     activeOrderTotal: (json['active_order_total'] as num?)?.toDouble() ?? 0.0,
     activeSessionId: json['active_session_id'] as String?,
     activeCoverCount: json['active_cover_count'] as int? ?? 0,
+    occupiedSince: json['occupied_since'] != null
+        ? DateTime.tryParse(json['occupied_since'] as String)
+        : null,
   );
 }
 
@@ -809,8 +1288,12 @@ class CartItem {
 
   double get total => rate * qty;
   String get itemName =>
-      (variant != null && variant!.variantName.toLowerCase() != 'default')
+      (variant != null && !variant!.isDefaultName)
       ? variant!.variantName
       : item.itemName;
-  double get rate => variant?.baseRate ?? item.baseRate;
+
+  /// Effective selling rate — delegates to the group so the variant's
+  /// price-inheritance rule (override vs. group base rate) is applied in
+  /// exactly one place.
+  double get rate => item.effectiveRateFor(variant);
 }

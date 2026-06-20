@@ -1565,6 +1565,15 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
             ),
           ],
         ),
+        const SizedBox(height: 10),
+        // Apply the default access template for the selected role.
+        _quickPermBtn(
+          "Apply '${_selectedRole.toUpperCase()}' preset",
+          Icons.auto_fix_high_rounded,
+          _roleColor(_selectedRole),
+          isDark,
+          _applyRolePreset,
+        ),
         const SizedBox(height: 16),
 
         // Billing group
@@ -1719,6 +1728,29 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
             ),
           ],
         ),
+        const SizedBox(height: 14),
+
+        // Inventory group (stock module — feature arriving soon, access
+        // configurable now so roles are ready when it ships).
+        _PermGroup(
+          title: 'Inventory  ·  Soon',
+          icon: Icons.warehouse_rounded,
+          accentColor: AppColors.accentTeal,
+          isDark: isDark,
+          items: [
+            _PermItem(
+              'Manage Stock / Inventory',
+              Icons.inventory_rounded,
+              p.canManageStock,
+              (v) => _updatePerm(
+                (p) => UserPermission.fromJson({
+                  ...p.toJson(),
+                  'can_manage_stock': v,
+                }),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -1773,6 +1805,18 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
         canManageUsers: value,
         canManageSettings: value,
         canVoidItems: value,
+        canManageStock: value,
+      );
+    });
+  }
+
+  /// Applies the sensible default access for the currently selected role —
+  /// mirrors how Petpooja seeds per-role module access as a starting point.
+  void _applyRolePreset() {
+    setState(() {
+      _selectedPermissions = UserPermission.forRole(
+        _selectedPermissions!.userId,
+        _selectedRole,
       );
     });
   }

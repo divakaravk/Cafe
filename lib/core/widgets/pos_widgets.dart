@@ -198,7 +198,9 @@ class CartItemRow extends StatelessWidget {
         final gap = compact ? 8.0 : 10.0;
 
         return Dismissible(
-          key: ValueKey('${cartItem.item.id}_${cartItem.variant?.id ?? 'none'}'),
+          key: ValueKey(
+            '${cartItem.item.id}_${cartItem.variant?.id ?? 'none'}',
+          ),
           direction: DismissDirection.endToStart,
           onDismissed: (_) => onRemove(),
           background: Container(
@@ -208,12 +210,18 @@ class CartItemRow extends StatelessWidget {
               color: AppColors.error.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.delete_outline,
-                color: AppColors.error, size: 18),
+            child: const Icon(
+              Icons.delete_outline,
+              color: AppColors.error,
+              size: 18,
+            ),
           ),
           child: Container(
             padding: EdgeInsets.all(pad),
-            margin: EdgeInsets.symmetric(vertical: compact ? 2 : 3, horizontal: 2),
+            margin: EdgeInsets.symmetric(
+              vertical: compact ? 2 : 3,
+              horizontal: 2,
+            ),
             decoration: BoxDecoration(
               color: isDark
                   ? AppColors.darkCard.withValues(alpha: 0.8)
@@ -339,6 +347,8 @@ class CartItemRow extends StatelessWidget {
         fit: BoxFit.cover,
         width: 36,
         height: 36,
+        memCacheWidth: 110,
+        maxWidthDiskCache: 200,
         fadeInDuration: const Duration(milliseconds: 200),
         fadeOutDuration: const Duration(milliseconds: 100),
         placeholder: (context, url) => Container(
@@ -505,6 +515,8 @@ class CategoryCard extends StatelessWidget {
                       imageUrl: imageUrl!,
                       height: 40,
                       width: 40,
+                      memCacheWidth: 120,
+                      maxWidthDiskCache: 200,
                       fadeInDuration: const Duration(milliseconds: 200),
                       fadeOutDuration: const Duration(milliseconds: 100),
                       placeholder: (context, url) => Container(
@@ -832,8 +844,14 @@ class SimpleVariantTile extends StatelessWidget {
                             child: CachedNetworkImage(
                               imageUrl: imageUrl!,
                               fit: BoxFit.cover,
+                              // Decode at ~display size for fast first paint and
+                              // smooth scrolling (Swiggy-style sized thumbnails).
+                              memCacheWidth: 300,
+                              maxWidthDiskCache: 400,
                               fadeInDuration: const Duration(milliseconds: 200),
-                              fadeOutDuration: const Duration(milliseconds: 100),
+                              fadeOutDuration: const Duration(
+                                milliseconds: 100,
+                              ),
                               placeholder: (context, url) => Container(
                                 color: isDark
                                     ? Colors.white.withValues(alpha: 0.07)
@@ -919,8 +937,10 @@ class SimpleVariantTile extends StatelessWidget {
                   final gap = (h * 0.05).clamp(1.0, 3.0);
                   return Padding(
                     padding: EdgeInsets.symmetric(
-                      horizontal:
-                          (constraints.maxWidth * 0.08).clamp(4.0, 10.0),
+                      horizontal: (constraints.maxWidth * 0.08).clamp(
+                        4.0,
+                        10.0,
+                      ),
                       vertical: hPad,
                     ),
                     child: Align(
@@ -966,6 +986,143 @@ class SimpleVariantTile extends StatelessWidget {
   }
 }
 
+/// Image-free menu tile — a compact, list-style card (Petpooja-style) showing a
+/// veg/non-veg marker, item name, price and a quick add control. Used when the
+/// company disables item images so the POS menu stays dense and fast.
+class CompactVariantTile extends StatelessWidget {
+  final String name;
+  final double price;
+  final String foodType;
+  final int cartCount;
+  final bool isAvailable;
+  final VoidCallback onTap;
+
+  const CompactVariantTile({
+    super.key,
+    required this.name,
+    required this.price,
+    required this.foodType,
+    this.cartCount = 0,
+    this.isAvailable = true,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = isDark ? AppColors.primaryAmber : AppColors.primaryOrange;
+    final inCart = cartCount > 0;
+
+    Color typeColor = Colors.green;
+    if (foodType == 'egg') typeColor = Colors.amber.shade700;
+    if (foodType == 'non-veg') typeColor = Colors.red;
+
+    return Opacity(
+      opacity: isAvailable ? 1 : 0.5,
+      child: InkWell(
+        onTap: isAvailable ? onTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.fromLTRB(10, 6, 8, 6),
+          decoration: BoxDecoration(
+            color: inCart
+                ? accent.withValues(alpha: isDark ? 0.12 : 0.07)
+                : (isDark ? AppColors.darkCard : AppColors.lightCard),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: inCart
+                  ? accent
+                  : (isDark
+                        ? AppColors.darkBorder.withValues(alpha: 0.2)
+                        : AppColors.lightBorder.withValues(alpha: 0.4)),
+              width: inCart ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              // Veg / non-veg marker (square, like FSSAI menu marks)
+              Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(color: typeColor, width: 1.5),
+                ),
+                child: Center(
+                  child: Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: typeColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              // Name + price
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          height: 1.15,
+                          color: isDark
+                              ? AppColors.textWhite
+                              : AppColors.textDark,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '₹${price.toStringAsFixed(0)}',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: accent,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Quick add / count control
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: inCart ? accent : accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                alignment: Alignment.center,
+                child: inCart
+                    ? Text(
+                        '$cartCount',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Icon(Icons.add_rounded, size: 18, color: accent),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Horizontal navigation chip for categories
 class ItemCategoryChip extends StatelessWidget {
   final String label;
@@ -984,40 +1141,49 @@ class ItemCategoryChip extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsets.only(right: 6),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(20),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
             color: isSelected
-                ? (isDark
-                      ? AppColors.primaryAmber.withValues(alpha: 0.2)
-                      : AppColors.primaryOrange.withValues(alpha: 0.1))
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
+                ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
+                : (isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.black.withValues(alpha: 0.04)),
+            borderRadius: BorderRadius.circular(20),
             border: Border.all(
               color: isSelected
                   ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
                   : (isDark
-                        ? AppColors.darkBorder.withValues(alpha: 0.4)
-                        : AppColors.lightBorder),
-              width: isSelected ? 1.5 : 1,
+                        ? Colors.white.withValues(alpha: 0.1)
+                        : Colors.black.withValues(alpha: 0.08)),
+              width: 1,
             ),
           ),
-          child: Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-              color: isSelected
-                  ? (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                  : (isDark
-                        ? AppColors.textWhiteMuted
-                        : AppColors.textDarkMuted),
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isSelected) ...[
+                Icon(Icons.check_circle_rounded, size: 14, color: Colors.white),
+                const SizedBox(width: 4),
+              ],
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected
+                      ? Colors.white
+                      : (isDark
+                            ? AppColors.textWhiteMuted
+                            : AppColors.textDarkMuted),
+                ),
+              ),
+            ],
           ),
         ),
       ),

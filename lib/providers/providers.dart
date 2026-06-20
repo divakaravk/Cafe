@@ -19,6 +19,26 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
     return const AsyncValue.loading();
   }
 
+  /// Resolves and caches the signed-in user's module permissions. Admins get
+  /// full access without a DB round-trip; everyone else uses their stored
+  /// permission row, falling back to role defaults when none exists.
+  Future<void> _syncPermissions(UserProfile profile) async {
+    UserPermission perms;
+    if (profile.isAdmin) {
+      perms = UserPermission.all(profile.id);
+    } else {
+      try {
+        final json = await SupabaseService.getUserPermissions(profile.id);
+        perms = json != null
+            ? UserPermission.fromJson(json)
+            : UserPermission.forRole(profile.id, profile.role);
+      } catch (_) {
+        perms = UserPermission.forRole(profile.id, profile.role);
+      }
+    }
+    await ref.read(permissionsProvider.notifier).set(perms);
+  }
+
   Future<void> _loadInitialSession() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -47,6 +67,7 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_sessionKey, jsonEncode(profileJson));
 
+      await _syncPermissions(profile);
       state = AsyncValue.data(profile);
     } catch (e, st) {
       state = AsyncValue.error(e.toString(), st);
@@ -68,8 +89,54 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionKey);
+    await ref.read(permissionsProvider.notifier).clear();
     await SupabaseService.signOut();
     state = const AsyncValue.data(null);
+  }
+}
+
+// ─── CURRENT USER PERMISSIONS ────────────────────────────
+// The signed-in user's module access, cached to SharedPreferences so screen
+// gating is instant and works offline (no per-screen network call). Populated
+// at sign-in by [AuthNotifier]; restored from cache on app start.
+final permissionsProvider =
+    NotifierProvider<PermissionsNotifier, UserPermission?>(
+      PermissionsNotifier.new,
+    );
+
+class PermissionsNotifier extends Notifier<UserPermission?> {
+  static const _key = 'user_permissions';
+
+  @override
+  UserPermission? build() {
+    _load();
+    return null;
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final j = prefs.getString(_key);
+    if (j != null) {
+      try {
+        state = UserPermission.fromJson(
+          jsonDecode(j) as Map<String, dynamic>,
+        );
+      } catch (_) {
+        state = null;
+      }
+    }
+  }
+
+  Future<void> set(UserPermission perms) async {
+    state = perms;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_key, jsonEncode(perms.toJson()));
+  }
+
+  Future<void> clear() async {
+    state = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);
   }
 }
 
@@ -98,6 +165,35 @@ final allItemsProvider = FutureProvider.family<List<Item>, String>((
 ) async {
   final res = await SupabaseService.getAllItems(companyId);
   return res.map((e) => Item.fromJson(e)).toList();
+});
+
+// ─── SELECTED POS ITEM GROUP (session memory) ────────────
+// Remembers which Item Group is selected in the POS for the session so the
+// grid does not reset when the widget rebuilds.
+final selectedPosGroupProvider =
+    NotifierProvider<SelectedPosGroupNotifier, String?>(
+      SelectedPosGroupNotifier.new,
+    );
+
+class SelectedPosGroupNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+
+  void select(String? groupId) => state = groupId;
+}
+
+// ─── VARIANTS BY GROUP (lazy, POS-sellable only) ─────────
+// Lazy-loads the active+available selling items for a single group. Groups
+// already embed their variants via [itemGroupsProvider]; this is the
+// pagination-ready entry point for very large menus where embedding is
+// undesirable.
+final variantsByGroupProvider =
+    FutureProvider.family<List<ItemVariant>, String>((ref, itemId) async {
+  final res = await SupabaseService.getVariantsByGroup(
+    itemId,
+    onlySellable: true,
+  );
+  return res.map((e) => ItemVariant.fromJson(e)).toList();
 });
 
 // ─── TABLES ──────────────────────────────────────────────

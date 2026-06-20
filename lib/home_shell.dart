@@ -15,6 +15,8 @@ import 'features/reports/bills_screen.dart';
 import 'features/admin/presentation/company_master_screen.dart';
 import 'features/admin/presentation/user_master_screen.dart';
 import 'features/admin/presentation/item_master_screen.dart';
+import 'features/admin/presentation/item_variant_screen.dart';
+import 'features/admin/presentation/table_master_screen.dart';
 import 'features/kitchen/kitchen_screen.dart';
 import 'features/admin/presentation/my_profile_screen.dart';
 
@@ -57,18 +59,37 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
   Widget build(BuildContext context) {
     final selectedTheme = ref.watch(selectedUiThemeProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final user = widget.user;
 
-    // Kitchen role: show only the KOT/kitchen screen
+    // Effective module access. Admins bypass gating; otherwise use the cached
+    // permission set, falling back to role defaults for legacy sessions that
+    // were created before permissions were cached.
+    final perms =
+        ref.watch(permissionsProvider) ??
+        (user.isAdmin
+            ? UserPermission.all(user.id)
+            : UserPermission.forRole(user.id, user.role));
+
+    // Kitchen role: dedicated full-screen KOT display.
     if (_isKitchen) {
       return Scaffold(
-        drawer: _buildUnifiedDrawer(context, isDark),
-        body: KitchenScreen(companyId: widget.user.companyId),
+        key: _scaffoldKey,
+        drawer: _buildUnifiedDrawer(context, isDark, perms, const []),
+        body: KitchenScreen(companyId: user.companyId),
       );
     }
 
-    final List<Widget> screens;
+    // Build the navigable modules from the user's access. Waiters keep their
+    // dedicated tables-only flow.
+    final List<_NavModule> modules;
     if (_isWaiter) {
-      screens = [TablesScreen(companyId: widget.user.companyId)];
+      modules = [
+        _NavModule(
+          Icons.table_restaurant_rounded,
+          'Tables & KOT',
+          TablesScreen(companyId: user.companyId),
+        ),
+      ];
     } else {
       Widget posScreen;
       switch (selectedTheme) {
@@ -82,23 +103,54 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
         default:
           posScreen = const ModernPosScreen();
       }
-      screens = [
-        posScreen,
-        TablesScreen(companyId: widget.user.companyId),
-        BillsScreen(companyId: widget.user.companyId),
+      modules = [
+        if (perms.canCreateBill)
+          _NavModule(Icons.point_of_sale_rounded, 'POS Terminal', posScreen),
+        if (perms.canManageTables)
+          _NavModule(
+            Icons.table_restaurant_rounded,
+            'Tables & KOT',
+            TablesScreen(companyId: user.companyId),
+          ),
+        if (perms.canViewReports)
+          _NavModule(
+            Icons.receipt_long_rounded,
+            'Bills & History',
+            BillsScreen(companyId: user.companyId),
+          ),
       ];
+      // Never leave the shell empty — fall back to POS if nothing was granted.
+      if (modules.isEmpty) {
+        modules.add(
+          _NavModule(Icons.point_of_sale_rounded, 'POS Terminal', posScreen),
+        );
+      }
     }
 
-    final safeIndex = _selectedNavIndex.clamp(0, screens.length - 1);
+    final safeIndex = _selectedNavIndex.clamp(0, modules.length - 1);
 
     return Scaffold(
       key: _scaffoldKey,
-      drawer: _buildUnifiedDrawer(context, isDark),
-      body: screens[safeIndex],
+      drawer: _buildUnifiedDrawer(context, isDark, perms, modules),
+      body: modules[safeIndex].screen,
     );
   }
 
-  Widget _buildUnifiedDrawer(BuildContext context, bool isDark) {
+  /// Whether any back-office master destination is visible for these
+  /// permissions.
+  bool _canSeeAdminSection(UserPermission p) =>
+      p.canManageSettings ||
+      p.canManageUsers ||
+      p.canManageItems ||
+      p.canManageStock ||
+      p.canManageTables;
+
+  Widget _buildUnifiedDrawer(
+    BuildContext context,
+    bool isDark,
+    UserPermission perms,
+    List<_NavModule> modules,
+  ) {
     final mediaQuery = MediaQuery.of(context);
     final isMobile = mediaQuery.size.width < 600;
 
@@ -129,112 +181,121 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                     isDark,
                     isSelected: true,
                   ),
-                ] else if (_isWaiter) ...[
-                  _buildDrawerSection('NAVIGATION', isDark),
-                  _buildDrawerItem(
-                    Icons.table_restaurant_rounded,
-                    'Tables & KOT',
-                    () {
-                      setState(() => _selectedNavIndex = 0);
-                      Navigator.pop(context);
-                    },
-                    isDark,
-                    isSelected: _selectedNavIndex == 0,
-                  ),
                 ] else ...[
                   _buildDrawerSection('NAVIGATION', isDark),
-                  _buildDrawerItem(
-                    Icons.point_of_sale_rounded,
-                    'POS Terminal',
-                    () {
-                      setState(() => _selectedNavIndex = 0);
-                      Navigator.pop(context);
-                    },
-                    isDark,
-                    isSelected: _selectedNavIndex == 0,
+                  // Navigation items mirror the permission-gated module list so
+                  // the drawer and the body stay in sync.
+                  ...modules.asMap().entries.map(
+                    (e) => _buildDrawerItem(
+                      e.value.icon,
+                      e.value.label,
+                      () {
+                        setState(() => _selectedNavIndex = e.key);
+                        Navigator.pop(context);
+                      },
+                      isDark,
+                      isSelected: _selectedNavIndex == e.key,
+                    ),
                   ),
-                  _buildDrawerItem(
-                    Icons.table_restaurant_rounded,
-                    'Tables & KOT',
-                    () {
-                      setState(() => _selectedNavIndex = 1);
-                      Navigator.pop(context);
-                    },
-                    isDark,
-                    isSelected: _selectedNavIndex == 1,
-                  ),
-                  _buildDrawerItem(
-                    Icons.receipt_long_rounded,
-                    'Bills & History',
-                    () {
-                      setState(() => _selectedNavIndex = 2);
-                      Navigator.pop(context);
-                    },
-                    isDark,
-                    isSelected: _selectedNavIndex == 2,
-                  ),
-                  if (widget.user.isAdmin) ...[
+                  // Kitchen Monitor lives in NAVIGATION (live KOT view), opened
+                  // as its own screen.
+                  if (perms.canManageTables)
+                    _buildDrawerItem(
+                      Icons.soup_kitchen_rounded,
+                      'Kitchen Monitor',
+                      () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                KitchenScreen(companyId: widget.user.companyId),
+                          ),
+                        );
+                      },
+                      isDark,
+                    ),
+                  if (_canSeeAdminSection(perms)) ...[
                     const Padding(
                       padding: EdgeInsets.symmetric(horizontal: 16),
                       child: Divider(height: 32),
                     ),
                     _buildDrawerSection('ADMIN MASTERS', isDark),
-                    _buildDrawerItem(
-                      Icons.business_rounded,
-                      'Company Master',
-                      () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const CompanyMasterScreen(),
+                    if (perms.canManageSettings)
+                      _buildDrawerItem(
+                        Icons.business_rounded,
+                        'Company Master',
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CompanyMasterScreen(),
+                          ),
                         ),
+                        isDark,
                       ),
-                      isDark,
-                    ),
-                    _buildDrawerItem(
-                      Icons.soup_kitchen_rounded,
-                      'Kitchen Monitor',
-                      () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              KitchenScreen(companyId: widget.user.companyId),
+                    if (perms.canManageTables)
+                      _buildDrawerItem(
+                        Icons.table_restaurant_rounded,
+                        'Table Master',
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const TableMasterScreen(),
+                          ),
                         ),
+                        isDark,
                       ),
-                      isDark,
-                    ),
-                    _buildDrawerItem(
-                      Icons.people_alt_rounded,
-                      'User Master',
-                      () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const UserMasterScreen(),
+                    if (perms.canManageUsers)
+                      _buildDrawerItem(
+                        Icons.people_alt_rounded,
+                        'User Master',
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const UserMasterScreen(),
+                          ),
                         ),
+                        isDark,
                       ),
-                      isDark,
-                    ),
-                    _buildDrawerItem(
-                      Icons.inventory_2_rounded,
-                      'Item Master',
-                      () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const ItemMasterScreen(),
+                    if (perms.canManageItems)
+                      _buildDrawerItem(
+                        Icons.category_rounded,
+                        'Item Group',
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ItemMasterScreen(),
+                          ),
                         ),
+                        isDark,
                       ),
-                      isDark,
-                    ),
-                    _buildDrawerItem(
-                      Icons.category_rounded,
-                      'Item Group',
-                      () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const ItemMasterScreen(),
+                    if (perms.canManageItems)
+                      _buildDrawerItem(
+                        Icons.inventory_2_rounded,
+                        'Item Variant',
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const ItemVariantScreen(),
+                          ),
                         ),
+                        isDark,
                       ),
-                      isDark,
-                    ),
+                    if (perms.canManageStock)
+                      _buildDrawerItem(
+                        Icons.warehouse_rounded,
+                        'Stock & Inventory',
+                        () {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Stock module coming soon'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        },
+                        isDark,
+                      ),
                   ],
                 ],
                 const Padding(
@@ -536,4 +597,13 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
       ),
     );
   }
+}
+
+/// A permission-gated navigation destination shown in the main shell body and
+/// mirrored in the drawer's NAVIGATION section.
+class _NavModule {
+  final IconData icon;
+  final String label;
+  final Widget screen;
+  const _NavModule(this.icon, this.label, this.screen);
 }

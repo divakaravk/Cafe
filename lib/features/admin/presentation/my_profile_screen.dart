@@ -811,6 +811,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
             perms: [
               _PermItem('Manage Users', _permissions!.canManageUsers),
               _PermItem('Manage Settings', _permissions!.canManageSettings),
+              _PermItem('Manage Stock', _permissions!.canManageStock),
             ],
           ),
         ] else

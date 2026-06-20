@@ -23,11 +23,8 @@ class ModernPosScreen extends ConsumerStatefulWidget {
 
 class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     with TickerProviderStateMixin {
-  String? _selectedSection;
-  Item? _selectedItem;
   String _searchQuery = '';
   final _searchController = TextEditingController();
-  bool _isGroupsOn = false;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   // Cart Animation State
@@ -38,6 +35,16 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
   // Top bar filter panel
   bool _showFilters = false;
+
+  // Group view toggle. ON: show Item Group chips + the selected group's items.
+  // OFF: hide the group chips and show every selling item (variant) in one grid.
+  bool _groupView = true;
+
+  // Tiles that have already played their entrance animation. GridView recycles
+  // tiles as you scroll, so without this each tile re-animates every time it
+  // re-enters the viewport (e.g. scrolling back up). We animate a tile only on
+  // its first appearance and show it statically thereafter.
+  final Set<String> _animatedTiles = {};
 
   // Billing state — guards against double-tap and drives button spinner.
   // A ValueNotifier (not setState) so the panel updates even when it lives in
@@ -58,9 +65,6 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   void initState() {
     super.initState();
     _initSpeech();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadSettings();
-    });
   }
 
   void _initSpeech() async {
@@ -168,17 +172,6 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     }
   }
 
-  Future<void> _loadSettings() async {
-    final user = ref.read(authStateProvider).value;
-    if (user != null) {
-      final company = await ref.read(companyProvider(user.companyId).future);
-      if (company != null) {
-        // We keep it disabled by default as per requirement
-        // setState(() => _isGroupsOn = company.hasItemVariants);
-      }
-    }
-  }
-
   @override
   void dispose() {
     _searchController.dispose();
@@ -199,6 +192,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     if (user == null) return const SizedBox.shrink();
 
     final itemGroupsAsync = ref.watch(itemGroupsProvider(user.companyId));
+    // Company-level toggle: when off, the menu renders compact image-free tiles.
+    final showImages =
+        ref.watch(companyProvider(user.companyId)).value?.showItemImages ??
+        true;
 
     return Scaffold(
       key: _scaffoldKey,
@@ -216,32 +213,44 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
         children: [
           Column(
             children: [
-              // Top Bar
+              // Top Bar (acts as the AppBar)
               _buildTopBar(isDark, user),
-              // Search
-              _buildSearchBar(isDark),
-              // Navigation Bar - section chips (Groups OFF) or item group chips (Groups ON)
-              itemGroupsAsync.when(
-                data: (items) => _isGroupsOn
-                    ? _buildItemGroupNav(items, isDark)
-                    : const SizedBox.shrink(),
-                loading: () => _isGroupsOn
-                    ? const SizedBox(height: 56)
-                    : const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-              // Menu area
+              // Item Groups + Search + Variant grid
               Expanded(
                 child: Stack(
                   children: [
                     itemGroupsAsync.when(
-                      data: (items) => _buildMenuArea(
-                        items,
-                        cart,
-                        cartNotifier,
-                        isDark,
-                        isTablet,
-                      ),
+                      data: (items) {
+                        final groups = _activeGroups(items);
+                        if (groups.isEmpty) return _buildEmptyState(isDark);
+                        final selected = _effectiveGroup(groups);
+                        return Column(
+                          children: [
+                            // Horizontal Item Group selector — immediately
+                            // below the AppBar. Hidden when group view is off.
+                            if (_groupView)
+                              _buildPosGroupSelector(groups, selected, isDark),
+                            _buildSearchBar(isDark),
+                            Expanded(
+                              child: _groupView
+                                  // Only the selected group's selling items.
+                                  ? _buildGroupVariantGrid(
+                                      selected,
+                                      cart,
+                                      isDark,
+                                      showImages,
+                                    )
+                                  // Every selling item across all groups.
+                                  : _buildAllVariantsGrid(
+                                      groups,
+                                      cart,
+                                      isDark,
+                                      showImages,
+                                    ),
+                            ),
+                          ],
+                        );
+                      },
                       loading: () => _buildSkeletonGrid(isDark),
                       error: (e, _) => _buildNetworkErrorState(e, isDark, user),
                     ),
@@ -409,6 +418,15 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               ),
             ),
             const SizedBox(width: 4),
+            // Group view toggle — always visible in the top bar.
+            _buildToggleChip(
+              icon: Icons.category_rounded,
+              label: 'Group',
+              value: _groupView,
+              isDark: isDark,
+              onTap: () => setState(() => _groupView = !_groupView),
+            ),
+            const SizedBox(width: 6),
             // Filter toggle button — reveals Voice & Groups chips
             GestureDetector(
               onTap: () => setState(() => _showFilters = !_showFilters),
@@ -464,24 +482,6 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                             () => _isVoiceAIEnabled = !_isVoiceAIEnabled,
                           ),
                         ),
-                        if (ref
-                                .watch(companyProvider(user.companyId))
-                                .value
-                                ?.hasItemVariants ??
-                            false) ...[
-                          const SizedBox(width: 6),
-                          _buildToggleChip(
-                            icon: Icons.layers_rounded,
-                            label: 'Groups',
-                            value: _isGroupsOn,
-                            isDark: isDark,
-                            onTap: () => setState(() {
-                              _isGroupsOn = !_isGroupsOn;
-                              _selectedItem = null;
-                              _selectedSection = null;
-                            }),
-                          ),
-                        ],
                       ],
                     )
                   : const SizedBox.shrink(),
@@ -717,109 +717,245 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     );
   }
 
-  // ─── TOP CATEGORY NAVIGATION (Groups OFF — section labels) ─────
-  Widget _buildTopCategoryNav(List<Item> items, bool isDark) {
-    final sections = items
-        .map((i) => i.sectionLabel)
-        .where((s) => s != null)
-        .toSet()
-        .toList();
-    sections.sort();
+  // ─── ITEM GROUPS (active, sorted) ───────────────────────
+  /// Active groups sorted by display order then name. Cached upstream by
+  /// [itemGroupsProvider]; this only shapes the in-memory list.
+  List<Item> _activeGroups(List<Item> items) {
+    final groups = items.where((i) => i.isActive).toList()
+      ..sort((a, b) {
+        final byOrder = a.displayOrder.compareTo(b.displayOrder);
+        return byOrder != 0
+            ? byOrder
+            : a.itemName.toLowerCase().compareTo(b.itemName.toLowerCase());
+      });
+    return groups;
+  }
 
+  /// Resolves the currently selected group from session state, defaulting to
+  /// the first group. Persists the auto-selection after the frame so the
+  /// choice is remembered for the session without mutating state mid-build.
+  Item _effectiveGroup(List<Item> groups) {
+    final selectedId = ref.watch(selectedPosGroupProvider);
+    Item? match;
+    if (selectedId != null) {
+      for (final g in groups) {
+        if (g.id == selectedId) {
+          match = g;
+          break;
+        }
+      }
+    }
+    final result = match ?? groups.first;
+    if (selectedId != result.id) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(selectedPosGroupProvider.notifier).select(result.id);
+        }
+      });
+    }
+    return result;
+  }
+
+  // ─── HORIZONTAL ITEM GROUP SELECTOR ─────────────────────
+  Widget _buildPosGroupSelector(List<Item> groups, Item selected, bool isDark) {
     return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: ListView(
+      height: 46,
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: [
-          ItemCategoryChip(
-            label: 'All',
-            isSelected: _selectedSection == null,
-            onTap: () => setState(() {
-              _selectedSection = null;
-              _selectedItem = null;
-            }),
-          ),
-          ...sections.map(
-            (s) => ItemCategoryChip(
-              label: s!,
-              isSelected: _selectedSection == s,
-              onTap: () => setState(() {
-                _selectedSection = s;
-                _selectedItem = null;
-              }),
-            ),
-          ),
-        ],
+        itemCount: groups.length,
+        itemBuilder: (context, index) {
+          final g = groups[index];
+          return ItemCategoryChip(
+            label: g.itemName,
+            isSelected: g.id == selected.id,
+            onTap: () {
+              if (g.id == selected.id) return;
+              ref.read(selectedPosGroupProvider.notifier).select(g.id);
+              // Clear search when switching groups for a clean view.
+              if (_searchQuery.isNotEmpty) {
+                _searchController.clear();
+                setState(() => _searchQuery = '');
+              }
+            },
+          );
+        },
       ),
     );
   }
 
-  // ─── ITEM GROUP NAVIGATION (Groups ON — master items with variants) ─────
-  Widget _buildItemGroupNav(List<Item> items, bool isDark) {
-    // Only show items that have variants as "groups"
-    final groups = items
-        .where((i) => i.hasVariants && i.variants.isNotEmpty)
-        .toList();
-
-    return Container(
-      height: 56,
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: [
-          ItemCategoryChip(
-            label: 'All',
-            isSelected: _selectedItem == null,
-            onTap: () => setState(() => _selectedItem = null),
-          ),
-          ...groups.map(
-            (g) => ItemCategoryChip(
-              label: g.itemName,
-              isSelected: _selectedItem?.id == g.id,
-              onTap: () => setState(() => _selectedItem = g),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── MENU AREA ──────────────────────────────────────────
-  Widget _buildMenuArea(
-    List<Item> masterItems,
+  // ─── VARIANT GRID (selling items of the selected group) ─
+  Widget _buildGroupVariantGrid(
+    Item group,
     List<CartItem> cart,
-    CartNotifier cartNotifier,
     bool isDark,
-    bool isTablet,
+    bool showImages,
   ) {
-    if (!_isGroupsOn) {
-      // FLAT VIEW — show all items + variants flattened
-      return _buildVariantGrid(
-        masterItems,
-        cart,
-        cartNotifier,
-        isDark,
-        isTablet,
+    // Only active + available selling items, already sorted by the model.
+    final variants = group.sellableVariants.where((v) {
+      if (_searchQuery.isEmpty) return true;
+      final name = v.isDefaultName ? group.itemName : v.variantName;
+      return name.toLowerCase().contains(_searchQuery);
+    }).toList();
+
+    if (variants.isEmpty) return _buildEmptyState(isDark);
+
+    return GridView.builder(
+      padding: _gridPadding(cart),
+      gridDelegate: _menuGridDelegate(showImages),
+      itemCount: variants.length,
+      itemBuilder: (context, index) {
+        final v = variants[index];
+        final cartItem = cart.firstWhere(
+          (ci) => ci.item.id == group.id && ci.variant?.id == v.id,
+          orElse: () => CartItem(item: group, variant: v, qty: 0),
+        );
+
+        return _animateOnce(
+          '${group.id}:${v.id}',
+          _menuTile(
+            name: v.isDefaultName ? group.itemName : v.variantName,
+            // Pricing inheritance resolved by the group (single source).
+            price: group.effectiveRateFor(v),
+            foodType: v.foodType,
+            imageUrl: v.imageUrl ?? group.imageUrl,
+            cartCount: cartItem.qty,
+            isAvailable: v.isActive && v.isAvailable,
+            onTap: () => _triggerCartAnimation(group, v),
+            showImages: showImages,
+          ),
+          stagger: index,
+        );
+      },
+    );
+  }
+
+  /// Grid delegate for the menu — image cards when [showImages], otherwise a
+  /// denser list of compact (image-free) rows.
+  SliverGridDelegate _menuGridDelegate(bool showImages) {
+    if (showImages) {
+      return SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: _gridCols(MediaQuery.sizeOf(context).width),
+        crossAxisSpacing: 8,
+        mainAxisSpacing: 8,
+        childAspectRatio: 0.85,
       );
     }
+    return const SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 260,
+      mainAxisExtent: 72,
+      crossAxisSpacing: 10,
+      mainAxisSpacing: 10,
+    );
+  }
 
-    // GROUPED VIEW
-    if (_selectedItem != null) {
-      // A specific group is selected → show its variants
-      return _buildDrillDownVariants(
-        _selectedItem!,
-        cart,
-        cartNotifier,
-        isDark,
-        isTablet,
+  /// Returns the right tile for the current image preference.
+  Widget _menuTile({
+    required String name,
+    required double price,
+    required String foodType,
+    String? imageUrl,
+    required int cartCount,
+    required bool isAvailable,
+    required VoidCallback onTap,
+    required bool showImages,
+  }) {
+    if (!showImages) {
+      return CompactVariantTile(
+        name: name,
+        price: price,
+        foodType: foodType,
+        cartCount: cartCount,
+        isAvailable: isAvailable,
+        onTap: onTap,
       );
     }
+    return SimpleVariantTile(
+      name: name,
+      price: price,
+      foodType: foodType,
+      imageUrl: imageUrl,
+      cartCount: cartCount,
+      isAvailable: isAvailable,
+      onTap: onTap,
+    );
+  }
 
-    // No group selected → show all parent item groups as tiles
-    return _buildGroupGrid(masterItems, cart, cartNotifier, isDark, isTablet);
+  // ─── ALL VARIANTS GRID (every selling item, no grouping) ─
+  Widget _buildAllVariantsGrid(
+    List<Item> groups,
+    List<CartItem> cart,
+    bool isDark,
+    bool showImages,
+  ) {
+    // Flatten every sellable selling item across all groups, keeping its
+    // owning group for pricing/image/food-type resolution.
+    final List<(Item, ItemVariant)> all = [];
+    for (final g in groups) {
+      for (final v in g.sellableVariants) {
+        final name = v.isDefaultName ? g.itemName : v.variantName;
+        if (_searchQuery.isEmpty || name.toLowerCase().contains(_searchQuery)) {
+          all.add((g, v));
+        }
+      }
+    }
+
+    if (all.isEmpty) return _buildEmptyState(isDark);
+
+    return GridView.builder(
+      padding: _gridPadding(cart),
+      gridDelegate: _menuGridDelegate(showImages),
+      itemCount: all.length,
+      itemBuilder: (context, index) {
+        final (group, v) = all[index];
+        final cartItem = cart.firstWhere(
+          (ci) => ci.item.id == group.id && ci.variant?.id == v.id,
+          orElse: () => CartItem(item: group, variant: v, qty: 0),
+        );
+
+        return _animateOnce(
+          '${group.id}:${v.id}',
+          _menuTile(
+            name: v.isDefaultName ? group.itemName : v.variantName,
+            price: group.effectiveRateFor(v),
+            foodType: v.foodType,
+            imageUrl: v.imageUrl ?? group.imageUrl,
+            cartCount: cartItem.qty,
+            isAvailable: v.isActive && v.isAvailable,
+            onTap: () => _triggerCartAnimation(group, v),
+            showImages: showImages,
+          ),
+          stagger: index,
+        );
+      },
+    );
+  }
+
+  /// Wraps a grid tile so its entrance animation plays only the first time the
+  /// tile becomes visible. Once seen (tracked by [key]), the tile is returned
+  /// as-is, so scrolling it back into view — or scrolling up — never replays
+  /// the fade/scale. [stagger] adds a small one-time delay for a wave effect on
+  /// the initial load, capped so later tiles don't wait noticeably.
+  Widget _animateOnce(String key, Widget tile, {required int stagger}) {
+    if (_animatedTiles.contains(key)) return tile;
+    _animatedTiles.add(key);
+    final delayMs = (15 * stagger).clamp(0, 300);
+    return tile
+        .animate()
+        .fadeIn(delay: delayMs.ms)
+        .scale(begin: const Offset(0.9, 0.9));
+  }
+
+  /// Grid padding that leaves room at the bottom so the last row isn't hidden
+  /// behind the mobile billing bar (shown only when the cart has items on a
+  /// non-tablet layout).
+  EdgeInsets _gridPadding(List<CartItem> cart) {
+    final mq = MediaQuery.of(context);
+    final isTablet = mq.size.width > 800;
+    final needsClearance = !isTablet && cart.isNotEmpty;
+    final bottom = needsClearance ? 96.0 + mq.viewPadding.bottom : 16.0;
+    return EdgeInsets.fromLTRB(16, 16, 16, bottom);
   }
 
   // ─── Responsive grid column count ───────────────────────
@@ -828,187 +964,6 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
     if (w >= 680) return 6;
     if (w >= 480) return 5;
     return 4;
-  }
-
-  // ─── Phase 1: Parent Item Grid ──────────────────────────
-  Widget _buildGroupGrid(
-    List<Item> masterItems,
-    List<CartItem> cart,
-    CartNotifier cartNotifier,
-    bool isDark,
-    bool isTablet,
-  ) {
-    // Filter master items by section
-    final filteredMasters = masterItems.where((i) {
-      final matchesSection =
-          _selectedSection == null || i.sectionLabel == _selectedSection;
-      final matchesSearch =
-          _searchQuery.isEmpty ||
-          i.itemName.toLowerCase().contains(_searchQuery.toLowerCase());
-      return matchesSection && matchesSearch;
-    }).toList();
-
-    if (filteredMasters.isEmpty) return _buildEmptyState(isDark);
-
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: _gridCols(MediaQuery.sizeOf(context).width),
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: filteredMasters.length,
-      itemBuilder: (context, index) {
-        final item = filteredMasters[index];
-        final isInCart = cart.any((ci) => ci.item.id == item.id);
-
-        return ItemGridTile(
-              item: item,
-              isInCart: isInCart,
-              onTap: () {
-                if (item.hasVariants && item.variants.isNotEmpty) {
-                  setState(() => _selectedItem = item);
-                } else {
-                  _triggerCartAnimation(item, null);
-                }
-              },
-            )
-            .animate()
-            .fadeIn(delay: (20 * index).ms)
-            .scale(begin: const Offset(0.9, 0.9));
-      },
-    );
-  }
-
-  // ─── Phase 2: Variants Grid for selected item group ─────
-  Widget _buildDrillDownVariants(
-    Item master,
-    List<CartItem> cart,
-    CartNotifier cartNotifier,
-    bool isDark,
-    bool isTablet,
-  ) {
-    final variants = master.variants.where((v) {
-      return _searchQuery.isEmpty ||
-          v.variantName.toLowerCase().contains(_searchQuery.toLowerCase());
-    }).toList();
-
-    if (variants.isEmpty) return _buildEmptyState(isDark);
-
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: _gridCols(MediaQuery.sizeOf(context).width),
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: variants.length,
-      itemBuilder: (context, index) {
-        final v = variants[index];
-        final cartItem = cart.firstWhere(
-          (ci) => ci.item.id == master.id && ci.variant?.id == v.id,
-          orElse: () => CartItem(item: master, variant: v, qty: 0),
-        );
-
-        return SimpleVariantTile(
-              name: (v.variantName.toLowerCase() == 'default')
-                  ? master.itemName
-                  : v.variantName,
-              price: v.baseRate,
-              foodType: master.foodType,
-              imageUrl: v.imageUrl ?? master.imageUrl,
-              cartCount: cartItem.qty,
-              isAvailable: v.isActive,
-              onTap: () => _triggerCartAnimation(master, v),
-            )
-            .animate()
-            .fadeIn(delay: (20 * index).ms)
-            .scale(begin: const Offset(0.9, 0.9));
-      },
-    );
-  }
-
-  // ─── VARIANT GRID (Consolidated All & Category view) ────
-  Widget _buildVariantGrid(
-    List<Item> masterItems,
-    List<CartItem> cart,
-    CartNotifier cartNotifier,
-    bool isDark,
-    bool isTablet,
-  ) {
-    final isAllMode = _selectedSection == null;
-
-    // Flatten items + variants based on selection
-    final List<Map<String, dynamic>> flatList = [];
-
-    final itemsToFlatten = isAllMode
-        ? masterItems
-        : masterItems.where((i) => i.sectionLabel == _selectedSection).toList();
-
-    for (final item in itemsToFlatten) {
-      if (!item.hasVariants || item.variants.isEmpty) {
-        flatList.add({'master': item, 'variant': null});
-      } else {
-        for (final v in item.variants) {
-          flatList.add({'master': item, 'variant': v});
-        }
-      }
-    }
-
-    // Filter by search
-    final filteredList = flatList.where((entry) {
-      final master = entry['master'] as Item;
-      final variant = entry['variant'] as ItemVariant?;
-      final fullName =
-          (variant == null || variant.variantName.toLowerCase() == 'default')
-          ? master.itemName
-          : '${master.itemName} ${variant.variantName}';
-      return _searchQuery.isEmpty ||
-          fullName.toLowerCase().contains(_searchQuery.toLowerCase());
-    }).toList();
-
-    if (filteredList.isEmpty) return _buildEmptyState(isDark);
-
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: _gridCols(MediaQuery.sizeOf(context).width),
-        crossAxisSpacing: 8,
-        mainAxisSpacing: 8,
-        childAspectRatio: 0.85,
-      ),
-      itemCount: filteredList.length,
-      itemBuilder: (context, index) {
-        final entry = filteredList[index];
-        final master = entry['master'] as Item;
-        final variant = entry['variant'] as ItemVariant?;
-
-        final cartItem = cart.firstWhere(
-          (ci) => ci.item.id == master.id && ci.variant?.id == variant?.id,
-          orElse: () => CartItem(item: master, variant: variant, qty: 0),
-        );
-
-        final displayName =
-            (variant == null || variant.variantName.toLowerCase() == 'default')
-            ? master.itemName
-            : variant.variantName;
-
-        return SimpleVariantTile(
-              name: displayName,
-              price: variant?.baseRate ?? master.baseRate,
-              foodType: master.foodType,
-              imageUrl: variant?.imageUrl ?? master.imageUrl,
-              cartCount: cartItem.qty,
-              isAvailable: variant?.isActive ?? master.isActive,
-              onTap: () => _triggerCartAnimation(master, variant),
-            )
-            .animate()
-            .fadeIn(delay: (20 * index).ms)
-            .scale(begin: const Offset(0.9, 0.9));
-      },
-    );
   }
 
   bool _isNetworkError(Object e) {
@@ -1038,7 +993,9 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                isNetwork ? Icons.wifi_off_rounded : Icons.error_outline_rounded,
+                isNetwork
+                    ? Icons.wifi_off_rounded
+                    : Icons.error_outline_rounded,
                 size: 40,
                 color: isNetwork ? AppColors.primaryOrange : AppColors.error,
               ),
@@ -1060,13 +1017,16 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
                   : 'Something went wrong. Please try again.',
               style: GoogleFonts.inter(
                 fontSize: 13,
-                color: isDark ? AppColors.textWhiteMuted : AppColors.textDarkMuted,
+                color: isDark
+                    ? AppColors.textWhiteMuted
+                    : AppColors.textDarkMuted,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () => ref.invalidate(itemGroupsProvider(user.companyId)),
+              onPressed: () =>
+                  ref.invalidate(itemGroupsProvider(user.companyId)),
               icon: const Icon(Icons.refresh_rounded, size: 18),
               label: Text(
                 'Retry',
@@ -1078,7 +1038,10 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryOrange,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 28,
+                  vertical: 12,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),

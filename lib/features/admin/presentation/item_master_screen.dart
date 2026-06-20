@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,6 +11,11 @@ import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 import '../../admin/presentation/item_variant_screen.dart';
 
+/// Item Group management.
+///
+/// This screen manages ONLY Item Groups (e.g. "Dosa", "Idly", "Rice"). The
+/// actual selling items live under each group as variants and are managed in
+/// [ItemVariantScreen]. Groups are never sold directly.
 class ItemMasterScreen extends ConsumerStatefulWidget {
   const ItemMasterScreen({super.key});
 
@@ -20,7 +26,12 @@ class ItemMasterScreen extends ConsumerStatefulWidget {
 class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
   bool _isLoading = false;
   List<Item> _items = [];
+  List<Map<String, dynamic>> _hsns = [];
   bool _isEditing = false;
+
+  // List search
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
 
   // Editor State
   Item? _selectedItem;
@@ -37,14 +48,9 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
 
   bool _isActive = true;
   bool _isTaxable = true;
-  bool _hasVariants = false;
-  String _foodType = 'veg';
+  String? _selectedHsnId;
   XFile? _pickedImage;
   String? _imageUrl;
-  List<ItemVariant> _variants = [];
-
-  // Metadata for dropdowns
-  final List<String> _foodTypes = ['veg', 'egg', 'non-veg'];
 
   @override
   void initState() {
@@ -52,24 +58,45 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
     _loadData();
   }
 
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _codeController.dispose();
+    _descController.dispose();
+    _rateController.dispose();
+    _orderController.dispose();
+    _sectionController.dispose();
+    _colorTagController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
       final user = ref.read(authStateProvider).value;
       if (user != null) {
-        final company = await ref.read(companyProvider(user.companyId).future);
-        final itemsData = await SupabaseService.getAllItems(user.companyId);
+        final results = await Future.wait([
+          SupabaseService.getItemGroups(user.companyId),
+          SupabaseService.getCompanyHsns(user.companyId),
+        ]);
         setState(() {
-          _items = itemsData.map((e) => Item.fromJson(e)).toList();
-          if (company != null && !company.hasItemVariants) {
-            _hasVariants = false;
-          }
+          _items = (results[0])
+              .map((e) => Item.fromJson(e))
+              .toList()
+            ..sort((a, b) {
+              final byOrder = a.displayOrder.compareTo(b.displayOrder);
+              return byOrder != 0
+                  ? byOrder
+                  : a.itemName.toLowerCase().compareTo(b.itemName.toLowerCase());
+            });
+          _hsns = results[1];
         });
       }
     } catch (e) {
       _showSnackBar('Error loading data: $e', AppColors.error);
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -95,15 +122,15 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       _nameController.text = item.itemName;
       _codeController.text = item.itemCode;
       _descController.text = item.description ?? '';
-      _rateController.text = item.baseRate.toString();
+      _rateController.text = item.baseRate.toStringAsFixed(
+        item.baseRate.truncateToDouble() == item.baseRate ? 0 : 2,
+      );
       _orderController.text = item.displayOrder.toString();
       _sectionController.text = item.sectionLabel ?? '';
       _colorTagController.text = item.colorTag ?? '';
       _isActive = item.isActive;
       _isTaxable = item.isTaxable;
-      _hasVariants = item.hasVariants;
-      _foodType = item.foodType;
-      _variants = List.from(item.variants);
+      _selectedHsnId = item.hsnId;
       _imageUrl = item.imageUrl;
       _pickedImage = null;
     });
@@ -119,11 +146,42 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
     _colorTagController.clear();
     _isActive = true;
     _isTaxable = true;
-    _hasVariants = false;
-    _foodType = 'veg';
-    _variants = [];
+    _selectedHsnId = null;
     _imageUrl = null;
     _pickedImage = null;
+  }
+
+  // ─── VALIDATION ─────────────────────────────────────────
+  String? _validateName(String? v) =>
+      (v == null || v.trim().isEmpty) ? 'Item Group name is required' : null;
+
+  String? _validateCode(String? v) {
+    final code = (v ?? '').trim();
+    if (code.isEmpty) return 'Item code is required';
+    final duplicate = _items.any(
+      (i) =>
+          i.id != _selectedItem?.id &&
+          i.itemCode.trim().toLowerCase() == code.toLowerCase(),
+    );
+    return duplicate ? 'This code is already used by another group' : null;
+  }
+
+  String? _validateRate(String? v) {
+    final raw = (v ?? '').trim();
+    if (raw.isEmpty) return 'Base rate is required';
+    final parsed = double.tryParse(raw);
+    if (parsed == null) return 'Enter a valid number';
+    if (parsed < 0) return 'Base rate must be ≥ 0';
+    return null;
+  }
+
+  String? _validateOrder(String? v) {
+    final raw = (v ?? '').trim();
+    if (raw.isEmpty) return null;
+    final parsed = int.tryParse(raw);
+    if (parsed == null) return 'Enter a whole number';
+    if (parsed < 0) return 'Display order must be ≥ 0';
+    return null;
   }
 
   Future<void> _pickImage() async {
@@ -150,88 +208,119 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
         currentImageUrl = await SupabaseService.uploadItemImage(id, bytes, ext);
       }
 
-      final companyAsync = ref.read(companyProvider(user.companyId));
-      final hasCompanyVariants = companyAsync.value?.hasItemVariants ?? false;
+      final baseRate = double.tryParse(_rateController.text.trim()) ?? 0;
 
       final itemData = {
         'id': id,
         'company_id': user.companyId,
-        'item_code': _codeController.text,
-        'item_name': _nameController.text,
-        'description': _descController.text,
-        'base_rate': double.tryParse(_rateController.text) ?? 0,
-        'has_variants':
-            hasCompanyVariants, // Always true if company supports it
+        'item_code': _codeController.text.trim(),
+        'item_name': _nameController.text.trim(),
+        'description':
+            _descController.text.trim().isEmpty ? null : _descController.text.trim(),
+        'base_rate': baseRate,
+        // A group is a container of selling items.
+        'has_variants': true,
         'is_taxable': _isTaxable,
         'is_active': _isActive,
-        'display_order': int.tryParse(_orderController.text) ?? 0,
+        'display_order': int.tryParse(_orderController.text.trim()) ?? 0,
         'image_url': currentImageUrl,
-        'section_label': _sectionController.text.isEmpty
-            ? null
-            : _sectionController.text,
-        'color_tag': _colorTagController.text.isEmpty
-            ? null
-            : _colorTagController.text,
-        'food_type': _foodType,
+        'section_label':
+            _sectionController.text.trim().isEmpty ? null : _sectionController.text.trim(),
+        'color_tag':
+            _colorTagController.text.trim().isEmpty ? null : _colorTagController.text.trim(),
+        'hsn_id': _selectedHsnId,
+        'updated_by': user.id,
       };
 
-      if (!hasCompanyVariants) {
-        // FLAT MODE: Manage one default variant matching master
-        final variantData = {
-          'id': _selectedItem?.variants.isNotEmpty == true
-              ? _selectedItem!.variants.first.id
-              : const Uuid().v4(),
+      await SupabaseService.client.from('item_master').upsert(itemData);
+
+      // Every group needs at least one sellable item. For a brand-new group
+      // create an inheriting "Default" selling item so it is immediately
+      // usable in the POS (base_rate 0 ⇒ inherits the group rate).
+      if (_selectedItem == null) {
+        final variantId = const Uuid().v4();
+        await SupabaseService.upsertVariant({
+          'id': variantId,
           'item_id': id,
           'variant_name': 'Default',
-          'base_rate': double.tryParse(_rateController.text) ?? 0,
-          'is_active': _isActive,
-          'is_available': _isActive,
-        };
-        await SupabaseService.saveItemWithVariants(
-          itemData: itemData,
-          variants: [variantData],
-        );
-      } else {
-        // MASTER MODE: Only save the master info. Variants are managed separately.
-        await SupabaseService.client.from('item_master').upsert(itemData);
-
-        // If it's a NEW item, we might want to create a default variant so it's usable in POS
-        if (_selectedItem == null) {
-          final defaultVariant = {
-            'id': const Uuid().v4(),
-            'item_id': id,
-            'variant_name': 'Default',
-            'base_rate': double.tryParse(_rateController.text) ?? 0,
-            'is_active': true,
-            'is_available': true,
-          };
-          await SupabaseService.upsertVariant(defaultVariant);
-        }
+          'base_rate': 0,
+          'is_active': true,
+          'is_available': true,
+          'is_default': true,
+          'display_order': 0,
+        });
+        await SupabaseService.client
+            .from('item_master')
+            .update({'default_variant_id': variantId}).eq('id', id);
       }
 
-      _showSnackBar('Saved successfully', AppColors.success);
+      _showSnackBar('Item Group saved', AppColors.success);
       ref.invalidate(itemGroupsProvider(user.companyId));
       ref.invalidate(allItemsProvider(user.companyId));
+      ref.invalidate(variantsByGroupProvider(id));
       setState(() => _isEditing = false);
       _loadData();
     } catch (e) {
-      debugPrint('Error saving: $e');
+      debugPrint('Error saving item group: $e');
       _showSnackBar('Error saving: $e', AppColors.error);
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  void _addVariant() {
-    setState(() {
-      _variants.add(
-        ItemVariant(
-          id: const Uuid().v4(),
-          itemId: _selectedItem?.id ?? '',
-          variantName: '',
-          baseRate: 0,
+  Future<void> _confirmDelete(Item item) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Item Group?'),
+        content: Text(
+          'Delete "${item.itemName}" and all of its selling items? '
+          'This cannot be undone.',
         ),
-      );
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: AppColors.error),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    try {
+      await SupabaseService.deleteItemMaster(item.id);
+      final user = ref.read(authStateProvider).value;
+      if (user != null) {
+        ref.invalidate(itemGroupsProvider(user.companyId));
+        ref.invalidate(allItemsProvider(user.companyId));
+      }
+      _showSnackBar('Item Group deleted', AppColors.success);
+      _loadData();
+    } catch (e) {
+      _showSnackBar('Error deleting: $e', AppColors.error);
+    }
+  }
+
+  void _openVariants(Item group) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ItemVariantScreen(item: group),
+      ),
+    ).then((_) {
+      // Refresh after returning so variant counts / default stay in sync.
+      final user = ref.read(authStateProvider).value;
+      if (user != null) {
+        ref.invalidate(itemGroupsProvider(user.companyId));
+        ref.invalidate(variantsByGroupProvider(group.id));
+      }
+      _loadData();
     });
   }
 
@@ -246,10 +335,26 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       backgroundColor: isDark ? AppColors.darkBg : AppColors.lightBg,
       appBar: AppBar(
         title: Text(
-          _isEditing ? 'Item Details' : 'Item Master',
-          style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+          _isEditing
+              ? (_selectedItem == null ? 'New Item Group' : 'Edit Item Group')
+              : 'Item Group',
+          style: GoogleFonts.inter(
+            fontWeight: FontWeight.w800,
+            color: Colors.white,
+          ),
         ),
         centerTitle: true,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [AppColors.primaryAmber, AppColors.primaryOrange],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
         leading: _isEditing
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
@@ -258,14 +363,21 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
             : null,
         actions: [
           if (_isEditing)
-            IconButton(icon: const Icon(Icons.check_rounded), onPressed: _save)
-          else
-            IconButton(
-              icon: const Icon(Icons.add_rounded),
-              onPressed: _startCreateItem,
-            ),
+            IconButton(icon: const Icon(Icons.check_rounded), onPressed: _save),
         ],
       ),
+      floatingActionButton: _isEditing
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _startCreateItem,
+              backgroundColor: AppColors.primaryOrange,
+              foregroundColor: Colors.white,
+              icon: const Icon(Icons.add_rounded),
+              label: Text(
+                'Add Group',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+              ),
+            ),
       body: _isLoading && !_isEditing
           ? const Center(child: CircularProgressIndicator())
           : _isEditing
@@ -283,11 +395,11 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
             Icon(
               Icons.inventory_2_outlined,
               size: 64,
-              color: AppColors.primaryAmber.withOpacity(0.5),
+              color: AppColors.primaryAmber.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(
-              'No items found',
+              'No item groups yet',
               style: GoogleFonts.inter(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
@@ -296,99 +408,240 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
             const SizedBox(height: 8),
             ElevatedButton(
               onPressed: _startCreateItem,
-              child: const Text('Add First Item'),
+              child: const Text('Add First Group'),
             ),
           ],
         ),
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _items.length,
-      itemBuilder: (context, index) {
-        final item = _items[index];
-        return Card(
-          elevation: 0,
-          color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-            side: BorderSide(
-              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+    final q = _searchQuery.trim().toLowerCase();
+    final filtered = q.isEmpty
+        ? _items
+        : _items.where((i) {
+            return i.itemName.toLowerCase().contains(q) ||
+                i.itemCode.toLowerCase().contains(q) ||
+                (i.sectionLabel ?? '').toLowerCase().contains(q);
+          }).toList();
+
+    return Column(
+      children: [
+        _buildSearchBar(isDark, 'Search groups by name, code, section…'),
+        Expanded(
+          child: filtered.isEmpty
+              ? _buildNoResults(isDark)
+              : RefreshIndicator(
+                  onRefresh: _loadData,
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 90),
+                    itemCount: filtered.length,
+                    itemBuilder: (context, index) {
+                      final item = filtered[index];
+          final sellableCount = item.sellableVariants.length;
+          return Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+              ),
             ),
-          ),
-          margin: const EdgeInsets.only(bottom: 12),
-          child: ListTile(
-            leading: _buildImagePreview(item.imageUrl, 24),
-            title: Row(
-              children: [
-                _buildFoodTypeDot(item.foodType),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    item.itemName,
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-            subtitle: Text(
-              '${item.sectionLabel ?? 'No Category'} • ₹${item.baseRate}',
-              style: GoogleFonts.inter(fontSize: 12),
-            ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (item.hasVariants) ...[
-                  if (ref
-                          .watch(companyProvider(user.companyId))
-                          .value
-                          ?.hasItemVariants ??
-                      false)
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _startEditItem(item),
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Row(
+                  children: [
+                    _buildImagePreview(item.imageUrl, 21),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  item.itemName,
+                                  style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13.5,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              if (!item.isActive) ...[
+                                const SizedBox(width: 6),
+                                _statusPill('Inactive', AppColors.error),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              Text(
+                                '₹${item.baseRate.toStringAsFixed(0)}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppColors.primaryOrange,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                item.sectionLabel ?? 'No Section',
+                                style: GoogleFonts.inter(
+                                  fontSize: 10.5,
+                                  color: isDark
+                                      ? AppColors.textWhiteMuted
+                                      : AppColors.textDarkMuted,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppColors.accentTeal.withValues(
+                                    alpha: 0.12,
+                                  ),
+                                  borderRadius: BorderRadius.circular(5),
+                                ),
+                                child: Text(
+                                  '$sellableCount item${sellableCount == 1 ? '' : 's'}',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.accentTeal,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                     IconButton(
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(),
+                      padding: const EdgeInsets.all(6),
+                      tooltip: 'Manage Selling Items',
                       icon: const Icon(
                         Icons.layers_rounded,
+                        size: 19,
                         color: AppColors.primaryAmber,
                       ),
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ItemVariantScreen(item: item),
-                        ),
-                      ),
-                      tooltip: 'Manage Variants',
-                    )
-                  else
-                    const Icon(
-                      Icons.layers_rounded,
-                      size: 16,
-                      color: AppColors.primaryAmber,
+                      onPressed: () => _openVariants(item),
                     ),
-                ],
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: const Icon(Icons.edit_rounded, size: 18),
-                  onPressed: () => _startEditItem(item),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(),
+                      padding: const EdgeInsets.all(6),
+                      icon: const Icon(
+                        Icons.delete_outline_rounded,
+                        size: 18,
+                        color: AppColors.error,
+                      ),
+                      onPressed: () => _confirmDelete(item),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-            onTap: () => _startEditItem(item),
-          ),
-        );
-      },
+          );
+                    },
+                  ),
+                ),
+        ),
+      ],
     );
   }
 
-  Widget _buildFoodTypeDot(String type) {
-    Color color = Colors.green;
-    if (type == 'egg') color = Colors.amber;
-    if (type == 'non-veg') color = Colors.red;
+  Widget _buildSearchBar(bool isDark, String hint) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 12, 12, 6),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (v) => setState(() => _searchQuery = v),
+        style: GoogleFonts.inter(fontSize: 14),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: GoogleFonts.inter(fontSize: 13, color: Colors.grey),
+          prefixIcon: const Icon(Icons.search_rounded, size: 20),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                )
+              : null,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          filled: true,
+          fillColor: isDark ? AppColors.darkSurface : AppColors.lightSurface,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            ),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+              color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+            ),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.primaryAmber),
+          ),
+        ),
+      ),
+    );
+  }
 
+  Widget _buildNoResults(bool isDark) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.search_off_rounded,
+            size: 48,
+            color: Colors.grey.withValues(alpha: 0.5),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No matches for "$_searchQuery"',
+            style: GoogleFonts.inter(fontSize: 14, color: Colors.grey),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusPill(String label, Color color) {
     return Container(
-      width: 10,
-      height: 10,
-      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 9,
+          color: color,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
     );
   }
 
@@ -397,212 +650,179 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       padding: const EdgeInsets.all(24),
       child: Form(
         key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildImagePickerSection(),
-            const SizedBox(height: 32),
-            _buildTextField(
-              controller: _nameController,
-              label: 'Item Name',
-              icon: Icons.title_rounded,
-              isDark: isDark,
-              validator: (v) => v!.isEmpty ? 'Required' : null,
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTextField(
-                    controller: _codeController,
-                    label: 'Item Code',
-                    icon: Icons.qr_code_rounded,
-                    isDark: isDark,
-                    validator: (v) => v!.isEmpty ? 'Required' : null,
-                  ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildImagePickerSection(),
+              const SizedBox(height: 32),
+              _buildTextField(
+                controller: _nameController,
+                label: 'Item Group Name',
+                icon: Icons.title_rounded,
+                isDark: isDark,
+                validator: _validateName,
+              ),
+              const SizedBox(height: 16),
+              _buildResponsiveRow(
+                isDark,
+                _buildTextField(
+                  controller: _codeController,
+                  label: 'Item Code',
+                  icon: Icons.qr_code_rounded,
+                  isDark: isDark,
+                  validator: _validateCode,
                 ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    value: _foodType,
-                    items: _foodTypes
-                        .map(
-                          (t) => DropdownMenuItem(
-                            value: t,
-                            child: Text(
-                              t.toUpperCase(),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (v) => setState(() => _foodType = v!),
-                    decoration: _inputDecoration(
-                      'Food Type',
-                      Icons.restaurant_menu,
-                      isDark,
+                _buildTextField(
+                  controller: _rateController,
+                  label: 'Base Rate (₹)',
+                  icon: Icons.currency_rupee_rounded,
+                  isDark: isDark,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                  ],
+                  validator: _validateRate,
+                ),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String?>(
+                isExpanded: true,
+                initialValue: _selectedHsnId,
+                items: [
+                  const DropdownMenuItem<String?>(
+                    value: null,
+                    child: Text('No HSN / Tax'),
+                  ),
+                  ..._hsns.map(
+                    (h) => DropdownMenuItem<String?>(
+                      value: h['id'] as String,
+                      child: Text(
+                        '${h['hsn_code']} • ${(h['gst_rate'] ?? 0)}%',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
+                ],
+                onChanged: (v) => setState(() => _selectedHsnId = v),
+                decoration: _inputDecoration(
+                  'Default HSN / GST (variants inherit)',
+                  Icons.receipt_long_rounded,
+                  isDark,
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTextField(
-                    controller: _sectionController,
-                    label: 'Section/Category',
-                    icon: Icons.category_rounded,
-                    isDark: isDark,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                const Spacer(),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTextField(
-                    controller: _rateController,
-                    label: 'Base Rate',
-                    icon: Icons.currency_rupee_rounded,
-                    isDark: isDark,
-                    keyboardType: TextInputType.number,
-                    validator: (v) => v!.isEmpty ? 'Required' : null,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            _buildTextField(
-              controller: _descController,
-              label: 'Description',
-              icon: Icons.description_outlined,
-              isDark: isDark,
-              maxLines: 2,
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildTextField(
-                    controller: _orderController,
-                    label: 'Display Order',
-                    icon: Icons.sort_rounded,
-                    isDark: isDark,
-                    keyboardType: TextInputType.number,
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: _buildTextField(
-                    controller: _colorTagController,
-                    label: 'Color Tag (hex)',
-                    icon: Icons.color_lens_rounded,
-                    isDark: isDark,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 16),
-            _buildToggle(
-              'Is Active',
-              'Visible in POS',
-              _isActive,
-              (v) => setState(() => _isActive = v),
-            ),
-            _buildToggle(
-              'Is Taxable',
-              'Apply GST/Taxes',
-              _isTaxable,
-              (v) => setState(() => _isTaxable = v),
-            ),
-
-            // Only show Master/Variant toggle if company supports it
-            // if enabled at company level, we treat the item as a master and manage variants separately
-            if (ref
-                    .watch(companyProvider(user.companyId))
-                    .value
-                    ?.hasItemVariants ??
-                false) ...[
+              ),
               const SizedBox(height: 16),
+              _buildResponsiveRow(
+                isDark,
+                _buildTextField(
+                  controller: _sectionController,
+                  label: 'Section / Category',
+                  icon: Icons.category_rounded,
+                  isDark: isDark,
+                ),
+                _buildTextField(
+                  controller: _orderController,
+                  label: 'Display Order',
+                  icon: Icons.sort_rounded,
+                  isDark: isDark,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  validator: _validateOrder,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _buildTextField(
+                controller: _colorTagController,
+                label: 'Color Tag (hex, optional)',
+                icon: Icons.color_lens_rounded,
+                isDark: isDark,
+              ),
+              const SizedBox(height: 16),
+              _buildTextField(
+                controller: _descController,
+                label: 'Description',
+                icon: Icons.description_outlined,
+                isDark: isDark,
+                maxLines: 2,
+              ),
+              const SizedBox(height: 24),
+              const Divider(),
+              const SizedBox(height: 8),
+              _buildToggle(
+                'Active',
+                'Visible in POS',
+                _isActive,
+                (v) => setState(() => _isActive = v),
+              ),
+              _buildToggle(
+                'Taxable',
+                'Apply GST / Taxes',
+                _isTaxable,
+                (v) => setState(() => _isTaxable = v),
+              ),
+              const SizedBox(height: 24),
               Center(
-                child: OutlinedButton.icon(
-                  onPressed: _selectedItem == null
-                      ? null
-                      : () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) =>
-                                ItemVariantScreen(item: _selectedItem!),
+                child: Column(
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _selectedItem == null
+                          ? null
+                          : () => _openVariants(_selectedItem!),
+                      icon: const Icon(Icons.layers_rounded),
+                      label: const Text('MANAGE SELLING ITEMS'),
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 12,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    ),
+                    if (_selectedItem == null)
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text(
+                          'Save the group first to add selling items',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: Colors.grey,
                           ),
                         ),
-                  icon: const Icon(Icons.layers_rounded),
-                  label: const Text('MANAGE VARIANTS'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 32,
-                      vertical: 12,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
-              if (_selectedItem == null)
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Center(
-                    child: Text(
-                      'Save item first to manage variants',
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        color: Colors.grey,
                       ),
-                    ),
-                  ),
-                ),
-            ] else ...[
-              _buildToggle(
-                'Has Variants',
-                'Multiple sizes/types',
-                _hasVariants,
-                (v) => setState(() => _hasVariants = v),
-              ),
-
-              if (_hasVariants) ...[
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Variants',
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                      ),
-                    ),
-                    TextButton.icon(
-                      onPressed: _addVariant,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add Variant'),
-                    ),
                   ],
                 ),
-                ..._buildVariantList(isDark),
-              ],
+              ),
+              const SizedBox(height: 40),
             ],
-            const SizedBox(height: 40),
-          ],
+          ),
         ),
       ),
+    );
+  }
+
+  /// Two fields side-by-side on wide screens, stacked on narrow ones.
+  Widget _buildResponsiveRow(bool isDark, Widget left, Widget right) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 420) {
+          return Column(
+            children: [left, const SizedBox(height: 16), right],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: left),
+            const SizedBox(width: 16),
+            Expanded(child: right),
+          ],
+        );
+      },
     );
   }
 
@@ -614,7 +834,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
             width: 120,
             height: 120,
             decoration: BoxDecoration(
-              color: AppColors.primaryAmber.withOpacity(0.1),
+              color: AppColors.primaryAmber.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
               image: _pickedImage != null
                   ? DecorationImage(
@@ -665,7 +885,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       width: radius * 2,
       height: radius * 2,
       decoration: BoxDecoration(
-        color: AppColors.primaryAmber.withOpacity(0.1),
+        color: AppColors.primaryAmber.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
         image: url != null
             ? DecorationImage(image: NetworkImage(url), fit: BoxFit.cover)
@@ -678,73 +898,6 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
               color: AppColors.primaryAmber,
             )
           : null,
-    );
-  }
-
-  List<Widget> _buildVariantList(bool isDark) {
-    return _variants.asMap().entries.map((entry) {
-      final index = entry.key;
-      final variant = entry.value;
-      return Card(
-        margin: const EdgeInsets.only(top: 12),
-        color: isDark ? AppColors.darkElevated : AppColors.lightElevated,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: TextFormField(
-                      initialValue: variant.variantName,
-                      onChanged: (v) =>
-                          _variants[index] = _updateVariant(variant, name: v),
-                      decoration: _inputDecoration(
-                        'Variant Name',
-                        null,
-                        isDark,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextFormField(
-                      initialValue: variant.baseRate.toString(),
-                      keyboardType: TextInputType.number,
-                      onChanged: (v) => _variants[index] = _updateVariant(
-                        variant,
-                        rate: double.tryParse(v),
-                      ),
-                      decoration: _inputDecoration('Rate', null, isDark),
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.delete_outline_rounded,
-                      color: AppColors.error,
-                    ),
-                    onPressed: () => setState(() => _variants.removeAt(index)),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-    }).toList();
-  }
-
-  ItemVariant _updateVariant(ItemVariant v, {String? name, double? rate}) {
-    return ItemVariant(
-      id: v.id,
-      itemId: v.itemId,
-      variantName: name ?? v.variantName,
-      baseRate: rate ?? v.baseRate,
-      isActive: v.isActive,
-      displayOrder: v.displayOrder,
-      isAvailable: v.isAvailable,
     );
   }
 
@@ -761,7 +914,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       ),
       subtitle: Text(subtitle, style: GoogleFonts.inter(fontSize: 12)),
       value: value,
-      activeColor: AppColors.primaryAmber,
+      activeThumbColor: AppColors.primaryAmber,
       onChanged: onChanged,
       contentPadding: EdgeInsets.zero,
     );
@@ -774,6 +927,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
     bool isDark = false,
     TextInputType? keyboardType,
     int maxLines = 1,
+    List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
   }) {
     return TextFormField(
@@ -781,6 +935,8 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       keyboardType: keyboardType,
       maxLines: maxLines,
       validator: validator,
+      inputFormatters: inputFormatters,
+      autovalidateMode: AutovalidateMode.onUserInteraction,
       style: GoogleFonts.inter(fontSize: 14),
       decoration: _inputDecoration(label, icon, isDark),
     );

@@ -75,6 +75,7 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
   bool _hasGst = false;
   bool _hasTableManagement = true;
   bool _hasItemVariants = false;
+  bool _showItemImages = true;
 
   @override
   void initState() {
@@ -134,6 +135,7 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
         _hasGst = data['has_gst'] ?? false;
         _hasTableManagement = data['has_table_management'] ?? true;
         _hasItemVariants = data['has_item_variants'] ?? false;
+        _showItemImages = data['show_item_images'] ?? true;
         _selectedCountry = data['country'] ?? 'India';
         _selectedState = data['state'];
         _selectedDistrict = data['city'];
@@ -174,12 +176,15 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
       'pan_number': _panController.text.trim(),
       'has_table_management': _hasTableManagement,
       'has_item_variants': _hasItemVariants,
+      'show_item_images': _showItemImages,
     };
     try {
       await SupabaseService.updateCompany(
         _company!.id,
         updatedData,
       ).timeout(const Duration(seconds: 15));
+      // Refresh the cached company so screens (e.g. POS image toggle) update.
+      ref.invalidate(companyProvider(_company!.id));
       if (mounted) _showSuccess('Company details updated successfully.');
     } on TimeoutException {
       if (mounted)
@@ -627,6 +632,19 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
           subtitle: 'Multiple sizes or portions per item',
           value: _hasItemVariants,
           onChanged: (v) => setState(() => _hasItemVariants = v),
+          isDark: isDark,
+          activeColor: AppColors.accentCoral,
+        ),
+        const SizedBox(height: 4),
+        Divider(
+          height: 20,
+          color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+        ),
+        _switchRow(
+          title: 'Show Item Images',
+          subtitle: 'Off: faster, compact name + price menu in POS',
+          value: _showItemImages,
+          onChanged: (v) => setState(() => _showItemImages = v),
           isDark: isDark,
           activeColor: AppColors.accentCoral,
         ),
