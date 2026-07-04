@@ -50,3 +50,8 @@ app.*.map.json
 # Local tooling & secrets (contains Supabase tokens — never commit)
 tools/
 api_keys.json
+
+# Firebase secrets — never commit
+**/google-services.json
+**/GoogleService-Info.plist
+*-firebase-adminsdk-*.json

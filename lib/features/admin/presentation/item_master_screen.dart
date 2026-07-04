@@ -7,6 +7,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/utils/api_helper.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 import '../../admin/presentation/item_variant_screen.dart';
@@ -102,9 +103,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
 
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message), backgroundColor: color));
+    AppFeedback.toast(context, message, isError: color == AppColors.error);
   }
 
   void _startCreateItem() {

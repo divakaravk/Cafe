@@ -7,8 +7,10 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/utils/api_helper.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
+import 'stock/recipe_editor_screen.dart';
 
 /// Manages the SELLING ITEMS (variants) that belong to one Item Group.
 ///
@@ -100,9 +102,7 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
 
   void _showError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: AppColors.error),
-    );
+    AppFeedback.toast(context, msg, isError: true);
   }
 
   double get _groupBaseRate => _selectedGroup?.baseRate ?? 0;
@@ -951,6 +951,26 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
                       ),
                     ),
                     // Actions
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      constraints: const BoxConstraints(),
+                      padding: const EdgeInsets.all(6),
+                      tooltip: 'Edit Recipe',
+                      icon: const Icon(
+                        Icons.menu_book_rounded,
+                        size: 18,
+                        color: AppColors.accentTeal,
+                      ),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => RecipeEditorScreen(
+                            itemVariantId: v.id,
+                            variantName: v.variantName,
+                          ),
+                        ),
+                      ),
+                    ),
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       constraints: const BoxConstraints(),

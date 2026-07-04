@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 import 'core/theme/app_colors.dart';
 import 'core/constants/app_constants.dart';
 import 'models/models.dart';
 import 'providers/providers.dart';
 import 'features/auth/presentation/login_screen.dart';
+import 'features/auth/presentation/owner_dashboard_screen.dart';
 import 'features/pos/presentation/modern_pos_screen.dart';
 import 'features/pos/presentation/quick_bill_screen.dart';
 import 'features/pos/presentation/classic_pos_screen.dart';
@@ -20,6 +21,7 @@ import 'features/admin/presentation/item_variant_screen.dart';
 import 'features/admin/presentation/table_master_screen.dart';
 import 'features/kitchen/kitchen_screen.dart';
 import 'features/admin/presentation/my_profile_screen.dart';
+import 'features/admin/presentation/stock/stock_dashboard_screen.dart';
 
 /// Main app shell — switches between login and POS based on auth state
 class HomeShell extends ConsumerWidget {
@@ -32,6 +34,9 @@ class HomeShell extends ConsumerWidget {
     return authState.maybeWhen(
       data: (user) {
         if (user == null) return const LoginScreen();
+        // The app owner isn't tied to a company — route to the dedicated
+        // company-registration approvals dashboard instead of the POS shell.
+        if (user.isOwner) return OwnerDashboardScreen(owner: user);
         return _AuthenticatedShell(user: user);
       },
       // Keep showing LoginScreen during loading/error if no user is authenticated
@@ -49,12 +54,47 @@ class _AuthenticatedShell extends ConsumerStatefulWidget {
       _AuthenticatedShellState();
 }
 
-class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
+class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
+    with WidgetsBindingObserver {
   int _selectedNavIndex = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  // Periodically re-validates the session against the server so a deactivated /
+  // force-logged-out / another-device login kicks this device to login quickly.
+  Timer? _sessionTimer;
+  static const _sessionCheckInterval = Duration(seconds: 20);
+
   bool get _isWaiter => widget.user.isWaiter;
   bool get _isKitchen => widget.user.isKitchen;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Check once right away, then on an interval.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(authStateProvider.notifier).validateSession();
+    });
+    _sessionTimer = Timer.periodic(
+      _sessionCheckInterval,
+      (_) => ref.read(authStateProvider.notifier).validateSession(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _sessionTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Re-check the moment the app returns to the foreground.
+    if (state == AppLifecycleState.resumed) {
+      ref.read(authStateProvider.notifier).validateSession();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -332,14 +372,11 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell> {
                                     'Stock & Inventory',
                                     () {
                                       Navigator.pop(context);
-                                      ScaffoldMessenger.of(
+                                      Navigator.push(
                                         context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Stock module coming soon',
-                                          ),
-                                          behavior: SnackBarBehavior.floating,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const StockSectionScreen(),
                                         ),
                                       );
                                     },

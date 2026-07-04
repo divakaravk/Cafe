@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/services/supabase_service.dart';
+import '../../core/utils/api_helper.dart';
 import '../../models/models.dart';
 import '../../providers/providers.dart';
 
@@ -104,11 +105,7 @@ class _CoverSelectionSheetState extends ConsumerState<CoverSelectionSheet> {
         ));
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
-        );
-      }
+      if (mounted) AppFeedback.toastError(context, e);
       setState(() => _saving = false);
     }
   }
@@ -122,9 +119,7 @@ class _CoverSelectionSheetState extends ConsumerState<CoverSelectionSheet> {
   Future<void> _billCover(TableCover cover) async {
     final total = _coverTotals[cover.id] ?? 0;
     if (total == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No orders for this cover yet')),
-      );
+      AppFeedback.warn(context, 'No orders for this cover yet');
       return;
     }
     final mode = await showDialog<String>(
@@ -143,17 +138,13 @@ class _CoverSelectionSheetState extends ConsumerState<CoverSelectionSheet> {
       widget.parentRef.invalidate(tablesProvider(widget.companyId));
       await _load();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('${cover.displayName} billed — ₹${total.toStringAsFixed(0)}'),
-          backgroundColor: AppColors.success,
-        ));
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
+        AppFeedback.success(
+          context,
+          '${cover.displayName} billed — ₹${total.toStringAsFixed(0)}',
         );
       }
+    } catch (e) {
+      if (mounted) AppFeedback.toastError(context, e);
     } finally {
       if (mounted) setState(() => _saving = false);
     }

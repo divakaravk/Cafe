@@ -49,22 +49,31 @@ class ReportState {
       startDate: startDate ?? this.startDate,
       endDate: endDate ?? this.endDate,
       isLoading: isLoading ?? this.isLoading,
-      error: error ?? this.error,
+      // Intentionally not `error ?? this.error`: callers pass `error: null` to
+      // clear a previous error on a fresh load/success. With `??` the stale
+      // error would stick forever and keep the error banner on screen.
+      error: error,
     );
   }
 
-  // Aggregations
-  double get totalRevenue => bills.fold(0.0, (sum, b) => sum + b.totalAmount);
-  double get totalGrossAmount => bills.fold(0.0, (sum, b) => sum + b.subtotal);
-  int get totalOrders => bills.length;
+  // Cancelled bills stay in [bills] for the audit ledger, but every revenue
+  // aggregation below works off [validBills] so they don't inflate totals.
+  List<Bill> get validBills => bills.where((b) => !b.isCancelled).toList();
 
-  double get cashTotal => bills
+  // Aggregations
+  double get totalRevenue =>
+      validBills.fold(0.0, (sum, b) => sum + b.totalAmount);
+  double get totalGrossAmount =>
+      validBills.fold(0.0, (sum, b) => sum + b.subtotal);
+  int get totalOrders => validBills.length;
+
+  double get cashTotal => validBills
       .where((b) => b.paymentMode.toUpperCase() == 'CASH')
       .fold(0.0, (sum, b) => sum + b.totalAmount);
-  double get upiTotal => bills
+  double get upiTotal => validBills
       .where((b) => b.paymentMode.toUpperCase() == 'UPI')
       .fold(0.0, (sum, b) => sum + b.totalAmount);
-  double get cardTotal => bills
+  double get cardTotal => validBills
       .where((b) => b.paymentMode.toUpperCase() == 'CARD')
       .fold(0.0, (sum, b) => sum + b.totalAmount);
 
@@ -74,7 +83,7 @@ class ReportState {
         filter == ReportDateFilter.today ||
         filter == ReportDateFilter.yesterday;
 
-    for (var bill in bills) {
+    for (var bill in validBills) {
       if (bill.createdAt == null) continue;
 
       // Convert to local time (IST) before grouping
@@ -108,7 +117,7 @@ class ReportState {
         filter == ReportDateFilter.today ||
         filter == ReportDateFilter.yesterday;
 
-    for (var bill in bills) {
+    for (var bill in validBills) {
       if (bill.createdAt == null) continue;
       final localCreatedAt = bill.createdAt!.toLocal();
 
@@ -135,7 +144,7 @@ class ReportState {
   // Returns Day -> { 'CASH': sum, 'UPI': sum }
   Map<DateTime, Map<String, double>> get paymentModeTrends {
     final Map<DateTime, Map<String, double>> trends = {};
-    for (var bill in bills) {
+    for (var bill in validBills) {
       if (bill.createdAt == null) continue;
       final date = DateTime(
         bill.createdAt!.toLocal().year,
@@ -156,7 +165,7 @@ class ReportState {
 
   Map<DateTime, Map<String, double>> get paymentModeCountTrends {
     final Map<DateTime, Map<String, double>> trends = {};
-    for (var bill in bills) {
+    for (var bill in validBills) {
       if (bill.createdAt == null) continue;
       final date = DateTime(
         bill.createdAt!.toLocal().year,
@@ -212,7 +221,7 @@ class ReportState {
 
   Map<String, double> get tableSales {
     final Map<String, double> sales = {};
-    for (var bill in bills) {
+    for (var bill in validBills) {
       if (bill.tableName == null || bill.tableName!.isEmpty) continue;
       sales[bill.tableName!] = (sales[bill.tableName!] ?? 0) + bill.totalAmount;
     }
@@ -223,7 +232,7 @@ class ReportState {
   /// Each entry: tableLabel, coverDisplayName, coverNumber (for color), total, billCount.
   List<Map<String, dynamic>> get coverEntries {
     final Map<String, Map<String, dynamic>> acc = {};
-    for (final bill in bills) {
+    for (final bill in validBills) {
       if (bill.coverNumber == null) continue;
       final tableLabel =
           bill.tableName != null ? 'Table ${bill.tableName}' : 'Takeaway';
@@ -267,6 +276,21 @@ class ReportNotifier extends StateNotifier<ReportState> {
   }) async {
     state = state.copyWith(filter: filter, startDate: start, endDate: end);
     await fetchReport();
+  }
+
+  /// Parses bill rows defensively — a single legacy/odd row (e.g. a null field)
+  /// is skipped and logged instead of failing the entire report load.
+  List<Bill> _parseBills(List<Map<String, dynamic>> rows) {
+    final out = <Bill>[];
+    for (final row in rows) {
+      try {
+        out.add(Bill.fromJson(row));
+      } catch (e) {
+        // ignore: avoid_print
+        print('Skipping unparseable bill row: $e');
+      }
+    }
+    return out;
   }
 
   Future<void> fetchReport() async {
@@ -316,8 +340,10 @@ class ReportNotifier extends StateNotifier<ReportState> {
           start = DateTime(end.year, end.month, 1);
           break;
         case ReportDateFilter.custom:
-          start = state.startDate;
-          end = state.endDate;
+          // Fall back to a sane last-30-days window if the custom range was
+          // never fully set, so a half-null range can't break the query.
+          start = state.startDate ?? end.subtract(const Duration(days: 30));
+          end = state.endDate ?? DateTime.now();
           break;
       }
 
@@ -326,7 +352,7 @@ class ReportNotifier extends StateNotifier<ReportState> {
         startDate: start,
         endDate: end,
       ).timeout(const Duration(seconds: 15));
-      final bills = res.map((e) => Bill.fromJson(e)).toList();
+      final bills = _parseBills(res);
 
       List<Bill> comparisonBills = [];
       if (compStart != null && compEnd != null) {
@@ -335,7 +361,7 @@ class ReportNotifier extends StateNotifier<ReportState> {
           startDate: compStart,
           endDate: compEnd,
         ).timeout(const Duration(seconds: 15));
-        comparisonBills = compRes.map((e) => Bill.fromJson(e)).toList();
+        comparisonBills = _parseBills(compRes);
       }
 
       state = state.copyWith(

@@ -1,6 +1,8 @@
 import 'dart:math' show min;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cafe/core/services/supabase_service.dart';
 import 'package:cafe/core/utils/api_helper.dart';
+import 'package:cafe/core/widgets/network_error_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,7 +22,14 @@ class TablesScreen extends ConsumerStatefulWidget {
   ConsumerState<TablesScreen> createState() => _TablesScreenState();
 }
 
-class _TablesScreenState extends ConsumerState<TablesScreen> {
+class _TablesScreenState extends ConsumerState<TablesScreen>
+    with SingleTickerProviderStateMixin {
+  // One shared controller drives the gentle "available" blink for every free
+  // table's chairs. A single ticker + FadeTransition (instead of a per-chair
+  // flutter_animate controller) keeps it smooth with no lag.
+  late final AnimationController _blinkController;
+  late final Animation<double> _blink;
+
   CafeTable? _selectedTable;
   String? _selectedCategory;
   String? _selectedCoverId;
@@ -59,11 +68,19 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
   @override
   void initState() {
     super.initState();
+    _blinkController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _blink = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _blinkController, curve: Curves.easeInOut),
+    );
     _initSpeech();
   }
 
   @override
   void dispose() {
+    _blinkController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -166,13 +183,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
         }
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('AI added ${orders.length} items to cart'),
-          backgroundColor: AppColors.success,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      AppFeedback.success(context, 'AI added ${orders.length} items to cart');
     } catch (e) {
       debugPrint('Cart parse error: $e');
     }
@@ -280,27 +291,26 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                           final table = sortedTables[index];
                           final isSelected = _selectedTable?.id == table.id;
 
-                          return _TableCard(
-                                table: table,
-                                isDark: isDark,
-                                isSelected: isSelected,
-                                onTap: () => _handleTableTap(table),
-                              )
-                              .animate()
-                              .fadeIn(
-                                delay: Duration(milliseconds: 30 * index),
-                                duration: 400.ms,
-                              )
-                              .scale(
-                                begin: const Offset(0.9, 0.9),
-                                curve: Curves.easeOutBack,
-                              );
+                          return RepaintBoundary(
+                            child: _TableCard(
+                              key: ValueKey(table.id),
+                              table: table,
+                              isDark: isDark,
+                              isSelected: isSelected,
+                              blink: _blink,
+                              onTap: () => _handleTableTap(table),
+                            ),
+                          );
                         },
                       );
                     },
                     loading: () =>
                         const Center(child: CircularProgressIndicator()),
-                    error: (e, _) => Center(child: Text('Error: $e')),
+                    error: (e, _) => NetworkErrorView(
+                      error: e,
+                      onRetry: () =>
+                          ref.invalidate(tablesProvider(widget.companyId)),
+                    ),
                   ),
                 ),
               ],
@@ -1040,32 +1050,20 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                                           .qty;
 
                                                       return _CompactItemTile(
-                                                            master: master,
-                                                            variant: variant,
-                                                            isDark: isDark,
-                                                            showImage:
-                                                                showImages,
-                                                            cartCount:
-                                                                cartCount,
-                                                            onTap: () =>
-                                                                cartNotifier
-                                                                    .addItem(
-                                                                      master,
-                                                                      variant,
-                                                                    ),
-                                                          )
-                                                          .animate()
-                                                          .fadeIn(
-                                                            delay:
-                                                                (15 * index).ms,
-                                                          )
-                                                          .scale(
-                                                            begin: const Offset(
-                                                              0.9,
-                                                              0.9,
+                                                        key: ValueKey(
+                                                          '${master.id}_${variant?.id ?? ''}',
+                                                        ),
+                                                        master: master,
+                                                        variant: variant,
+                                                        isDark: isDark,
+                                                        showImage: showImages,
+                                                        cartCount: cartCount,
+                                                        onTap: () => cartNotifier
+                                                            .addItem(
+                                                              master,
+                                                              variant,
                                                             ),
-                                                            duration: 180.ms,
-                                                          );
+                                                      );
                                                     },
                                                   ),
                                           ),
@@ -1075,8 +1073,13 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                                     loading: () => const Center(
                                       child: CircularProgressIndicator(),
                                     ),
-                                    error: (e, _) =>
-                                        Center(child: Text('Error: $e')),
+                                    error: (e, _) => NetworkErrorView(
+                                      error: e,
+                                      compact: true,
+                                      onRetry: () => ref.invalidate(
+                                        allItemsProvider(widget.companyId),
+                                      ),
+                                    ),
                                   ),
 
                                   // Floating Microphone Button
@@ -1847,7 +1850,11 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
     final color = isBilled
         ? AppColors.success
         : _coverAccent(cover.coverNumber);
-    final canDelete = !isBilled && total == 0 && !_overviewSaving;
+    // A cover may only be swiped away when the *whole table* is still empty.
+    // If any customer/cover on this table has ordered something, removing
+    // covers is blocked to avoid losing context for an active order.
+    final canDelete =
+        !isBilled && total == 0 && _overviewItems.isEmpty && !_overviewSaving;
 
     final card = Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -2095,10 +2102,17 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
                         width: 44,
                         height: 44,
                         child: imageUrl != null && imageUrl.isNotEmpty
-                            ? Image.network(
-                                imageUrl,
+                            ? CachedNetworkImage(
+                                imageUrl: imageUrl,
                                 fit: BoxFit.cover,
-                                errorBuilder: (_, __, ___) =>
+                                memCacheWidth: 120,
+                                maxWidthDiskCache: 200,
+                                fadeInDuration: const Duration(
+                                  milliseconds: 150,
+                                ),
+                                placeholder: (_, __) =>
+                                    _cartImagePlaceholder(isDark),
+                                errorWidget: (_, __, ___) =>
                                     _cartImagePlaceholder(isDark),
                               )
                             : _cartImagePlaceholder(isDark),
@@ -2188,7 +2202,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen> {
               ),
             ],
           ),
-        ).animate().fadeIn(delay: (50 * index).ms).slideX(begin: 0.1);
+        );
       },
     );
   }
@@ -3015,12 +3029,15 @@ class _TableCard extends ConsumerWidget {
   final CafeTable table;
   final bool isDark;
   final bool isSelected;
+  final Animation<double> blink;
   final VoidCallback onTap;
 
   const _TableCard({
+    super.key,
     required this.table,
     required this.isDark,
     required this.isSelected,
+    required this.blink,
     required this.onTap,
   });
 
@@ -3137,6 +3154,7 @@ class _TableCard extends ConsumerWidget {
                           status == 'OCCUPIED',
                           isTablet,
                           isFree: status == 'FREE',
+                          blink: blink,
                         ),
                         const Spacer(),
                         // Status badge + how long the table has been occupied
@@ -3185,17 +3203,7 @@ class _TableCard extends ConsumerWidget {
                                   ],
                                 ),
                               );
-                              // Free tables: the "Available" badge softly blinks.
-                              if (status != 'FREE') return badge;
-                              return badge
-                                  .animate(
-                                    onPlay: (c) => c.repeat(reverse: true),
-                                  )
-                                  .fadeIn(
-                                    begin: 0.45,
-                                    duration: 900.ms,
-                                    curve: Curves.easeInOut,
-                                  );
+                              return badge;
                             }(),
                             if (table.isOccupied &&
                                 table.occupiedSince != null) ...[
@@ -3209,40 +3217,52 @@ class _TableCard extends ConsumerWidget {
                     const Spacer(),
                     // Bottom row with Details
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        _buildDetailLabel(
-                          _sizeLabel.toUpperCase(),
-                          isDark,
-                          isTablet,
-                        ),
-                        _buildSeparator(isDark, isTablet),
-                        _buildDetailLabel(
-                          '${table.seatingCapacity} PAX',
-                          isDark,
-                          isTablet,
-                        ),
-                        if (table.isOccupied && table.activeCoverCount > 0) ...[
-                          _buildSeparator(isDark, isTablet),
-                          Container(
-                            padding: EdgeInsets.symmetric(
-                              horizontal: isTablet ? 8 : 5,
-                              vertical: isTablet ? 3 : 1.5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.error.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              '${table.activeCoverCount}C',
-                              style: GoogleFonts.inter(
-                                fontSize: isTablet ? 10 : 8,
-                                fontWeight: FontWeight.w800,
-                                color: AppColors.error,
-                              ),
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                _buildDetailLabel(
+                                  _sizeLabel.toUpperCase(),
+                                  isDark,
+                                  isTablet,
+                                ),
+                                _buildSeparator(isDark, isTablet),
+                                _buildDetailLabel(
+                                  '${table.seatingCapacity} PAX',
+                                  isDark,
+                                  isTablet,
+                                ),
+                                if (table.isOccupied && table.activeCoverCount > 0) ...[
+                                  _buildSeparator(isDark, isTablet),
+                                  Container(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: isTablet ? 8 : 5,
+                                      vertical: isTablet ? 3 : 1.5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.error.withValues(alpha: 0.1),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      '${table.activeCoverCount}C',
+                                      style: GoogleFonts.inter(
+                                        fontSize: isTablet ? 10 : 8,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppColors.error,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
-                        ],
-                        const Spacer(),
+                        ),
+                        const SizedBox(width: 4),
                         Container(
                           padding: EdgeInsets.symmetric(
                             horizontal: isTablet ? 10 : 5,
@@ -3351,6 +3371,7 @@ Widget _buildTableIcon(
   bool isOccupied,
   bool isTablet, {
   bool isFree = false,
+  Animation<double>? blink,
 }) {
   final capacity = table.seatingCapacity;
 
@@ -3367,6 +3388,7 @@ Widget _buildTableIcon(
           isOccupied,
           isTablet,
           isFree: isFree,
+          blink: blink,
         ),
 
         // The Table Surface
@@ -3411,16 +3433,10 @@ Widget _buildTableIcon(
                   color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
-            )
-            .animate(target: isOccupied ? 1 : 0)
-            .shimmer(
-              duration: 2000.ms,
-              color: (isDark ? AppColors.primaryAmber : AppColors.primaryOrange)
-                  .withValues(alpha: 0.2),
             ),
       ],
     ),
-  ).animate().fadeIn(duration: 400.ms).scale(begin: const Offset(0.8, 0.8));
+  );
 }
 
 List<Widget> _buildDynamicChairs(
@@ -3429,6 +3445,7 @@ List<Widget> _buildDynamicChairs(
   bool isOccupied,
   bool isTablet, {
   bool isFree = false,
+  Animation<double>? blink,
 }) {
   final List<Widget> chairs = [];
 
@@ -3437,13 +3454,13 @@ List<Widget> _buildDynamicChairs(
   chairs.add(
     Positioned(
       left: 0,
-      child: _buildChair(isDark, isOccupied, 0, isTablet: isTablet, isFree: isFree),
+      child: _buildChair(isDark, isOccupied, 0, isTablet: isTablet, isFree: isFree, blink: blink),
     ),
   );
   chairs.add(
     Positioned(
       right: 0,
-      child: _buildChair(isDark, isOccupied, 1, isTablet: isTablet, isFree: isFree),
+      child: _buildChair(isDark, isOccupied, 1, isTablet: isTablet, isFree: isFree, blink: blink),
     ),
   );
 
@@ -3459,6 +3476,7 @@ List<Widget> _buildDynamicChairs(
           horizontal: true,
           isTablet: isTablet,
           isFree: isFree,
+          blink: blink,
         ),
       ),
     );
@@ -3472,6 +3490,7 @@ List<Widget> _buildDynamicChairs(
           horizontal: true,
           isTablet: isTablet,
           isFree: isFree,
+          blink: blink,
         ),
       ),
     );
@@ -3484,14 +3503,14 @@ List<Widget> _buildDynamicChairs(
       Positioned(
         left: 0,
         top: isTablet ? 8 : 6,
-        child: _buildChair(isDark, isOccupied, 4, isTablet: isTablet, isFree: isFree),
+        child: _buildChair(isDark, isOccupied, 4, isTablet: isTablet, isFree: isFree, blink: blink),
       ),
     );
     chairs.add(
       Positioned(
         right: 0,
         bottom: isTablet ? 8 : 6,
-        child: _buildChair(isDark, isOccupied, 5, isTablet: isTablet, isFree: isFree),
+        child: _buildChair(isDark, isOccupied, 5, isTablet: isTablet, isFree: isFree, blink: blink),
       ),
     );
   }
@@ -3506,6 +3525,7 @@ Widget _buildChair(
   bool horizontal = false,
   required bool isTablet,
   bool isFree = false,
+  Animation<double>? blink,
 }) {
   // Free chairs get a soft green tint so the blink reads clearly.
   final Color fillColor = isFree
@@ -3530,37 +3550,14 @@ Widget _buildChair(
     ),
   );
 
-  // Available tables: chairs gently blink (staggered) to invite seating.
-  if (isFree) {
-    return chair
-        .animate(onPlay: (c) => c.repeat(reverse: true))
-        .fadeIn(
-          begin: 0.25,
-          delay: (index * 120).ms,
-          duration: 800.ms,
-          curve: Curves.easeInOut,
-        )
-        .scaleXY(
-          begin: 0.85,
-          end: 1.0,
-          delay: (index * 120).ms,
-          duration: 800.ms,
-          curve: Curves.easeInOut,
-        );
+  // Free tables: chairs gently blink to invite seating. Driven by one shared
+  // controller via FadeTransition (repaints only the chair, not the card), so
+  // it stays smooth even with many tables on screen.
+  if (isFree && blink != null) {
+    return FadeTransition(opacity: blink, child: chair);
   }
 
-  return chair
-      .animate(
-        target: isOccupied ? 1 : 0,
-        onPlay: (controller) =>
-            isOccupied ? controller.repeat(reverse: true) : null,
-      )
-      .custom(
-        duration: 1500.ms,
-        builder: (context, value, child) {
-          return Transform.scale(scale: 1 + (value * 0.1), child: child);
-        },
-      );
+  return chair;
 }
 
 class _CompactItemTile extends StatelessWidget {
@@ -3572,6 +3569,7 @@ class _CompactItemTile extends StatelessWidget {
   final VoidCallback onTap;
 
   const _CompactItemTile({
+    super.key,
     required this.master,
     this.variant,
     required this.isDark,
@@ -3640,11 +3638,17 @@ class _CompactItemTile extends StatelessWidget {
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
                         child: imageUrl != null && imageUrl.isNotEmpty
-                            ? Image.network(
-                                imageUrl,
+                            ? CachedNetworkImage(
+                                imageUrl: imageUrl,
                                 fit: BoxFit.cover,
                                 width: double.infinity,
-                                errorBuilder: (_, __, ___) =>
+                                memCacheWidth: 300,
+                                maxWidthDiskCache: 400,
+                                fadeInDuration: const Duration(
+                                  milliseconds: 150,
+                                ),
+                                placeholder: (_, __) => const SizedBox.shrink(),
+                                errorWidget: (_, __, ___) =>
                                     const Icon(Icons.fastfood),
                               )
                             : const Icon(Icons.fastfood, color: Colors.grey),

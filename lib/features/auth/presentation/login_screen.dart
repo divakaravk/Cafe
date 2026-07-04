@@ -4,7 +4,9 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
+import '../../../core/utils/api_helper.dart';
 import '../../../providers/providers.dart';
+import 'company_registration_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -32,15 +34,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     if (!force &&
         (_emailController.text.trim().isEmpty ||
             _passwordController.text.isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Please enter username/email and password',
-            style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
-          ),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-        ),
+      AppFeedback.toast(
+        context,
+        'Please enter username/email and password',
+        isError: true,
       );
       setState(() => _triggerShake = true);
       Future.delayed(const Duration(milliseconds: 500), () {
@@ -157,22 +154,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
     }
   }
 
-  void _preFill(String email, String password) {
-    setState(() {
-      _emailController.text = email;
-      _passwordController.text = password;
-      _triggerShake = true;
-    });
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) setState(() => _triggerShake = false);
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final size = MediaQuery.of(context).size;
     final isDesktop = size.width > 850;
+
+    // The session guard logs the user out (inactive / another device) and
+    // routes here — surface its reason as a top toast, then clear it.
+    ref.listen(sessionKickProvider, (prev, next) {
+      if (next != null && next.isNotEmpty) {
+        AppFeedback.toast(context, next, isError: true);
+        ref.read(sessionKickProvider.notifier).clear();
+      }
+    });
 
     ref.listen(authStateProvider, (prev, next) {
       if (next is AsyncError) {
@@ -184,16 +179,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
           return;
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Login failed: $err',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.w600),
-            ),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        // Show clean business messages (e.g. deactivated account) as-is;
+        // prefix only unexpected technical errors.
+        final friendly =
+            (err.toLowerCase().contains('inactive') ||
+                err.toLowerCase().contains('deactivat') ||
+                err.toLowerCase().contains('password') ||
+                err.toLowerCase().contains('not found'))
+            ? err
+            : 'Login failed: $err';
+        AppFeedback.toast(context, friendly, isError: true);
         setState(() => _triggerShake = true);
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) setState(() => _triggerShake = false);
@@ -388,57 +383,41 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
                   .fadeIn(delay: 450.ms, duration: 400.ms)
                   .moveY(begin: 12, end: 0, curve: Curves.easeOutCubic),
 
-              const SizedBox(height: 28),
+              const SizedBox(height: 24),
 
-              // Demo Quick Credentials Section
-              const Divider(height: 1),
-              const SizedBox(height: 20),
-              Text(
-                'QUICK DEMO LOGINS',
-                style: GoogleFonts.outfit(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: isDark
-                      ? AppColors.textWhiteMuted.withValues(alpha: 0.6)
-                      : AppColors.textDarkMuted.withValues(alpha: 0.6),
-                  letterSpacing: 1.2,
+              // New company registration entry point
+              Center(
+                child: Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      'New here?',
+                      style: GoogleFonts.outfit(
+                        fontSize: 13,
+                        color: isDark
+                            ? AppColors.textWhiteMuted
+                            : AppColors.textDarkMuted,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const CompanyRegistrationScreen(),
+                        ),
+                      ),
+                      child: Text(
+                        'Register your company',
+                        style: GoogleFonts.outfit(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.primaryOrange,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ).animate().fadeIn(delay: 500.ms, duration: 400.ms),
-              const SizedBox(height: 12),
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: demoCredentials.map((cred) {
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8.0),
-                      child: ActionChip(
-                        avatar: Icon(cred.icon, size: 15, color: cred.color),
-                        label: Text(
-                          cred.label,
-                          style: GoogleFonts.outfit(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                        backgroundColor: isDark
-                            ? AppColors.darkCard
-                            : AppColors.lightCard,
-                        side: BorderSide(
-                          color: isDark
-                              ? AppColors.darkBorder.withValues(alpha: 0.5)
-                              : AppColors.lightBorder.withValues(alpha: 0.7),
-                          width: 1,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        onPressed: () => _preFill(cred.email, cred.password),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ).animate().fadeIn(delay: 550.ms, duration: 400.ms),
             ],
           ),
         )
@@ -979,51 +958,3 @@ class BrandIntroductionPanel extends StatelessWidget {
     );
   }
 }
-
-// ─── DEMO CREDENTIAL MODEL & DEFINITIONS ─────────────────────────────
-class DemoCredential {
-  final String label;
-  final String email;
-  final String password;
-  final IconData icon;
-  final Color color;
-
-  const DemoCredential({
-    required this.label,
-    required this.email,
-    required this.password,
-    required this.icon,
-    required this.color,
-  });
-}
-
-const List<DemoCredential> demoCredentials = [
-  DemoCredential(
-    label: 'Admin',
-    email: 'admin@mycafe.com',
-    password: 'Admin@123',
-    icon: Icons.admin_panel_settings_rounded,
-    color: Color(0xFFC62828),
-  ),
-  DemoCredential(
-    label: 'Manager',
-    email: 'divakaravk11@gmail.com',
-    password: 'divakar@123',
-    icon: Icons.manage_accounts_rounded,
-    color: Color(0xFFE65100),
-  ),
-  DemoCredential(
-    label: 'Waiter',
-    email: 'waiter@mycafe.com',
-    password: 'Waiter@123',
-    icon: Icons.room_service_rounded,
-    color: Color(0xFF00897B),
-  ),
-  DemoCredential(
-    label: 'Kitchen',
-    email: 'kitchen@mycafe.com',
-    password: 'Kitchen@123',
-    icon: Icons.soup_kitchen_rounded,
-    color: Color(0xFFFFAB00),
-  ),
-];

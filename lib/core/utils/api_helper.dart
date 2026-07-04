@@ -111,87 +111,219 @@ Future<T> safeApiCall<T>(
 // ─── UI Feedback ──────────────────────────────────────────────────────────────
 
 class AppFeedback {
-  /// Green success snackbar
-  static void success(BuildContext context, String message) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      _snack(
-        message: message,
-        icon: Icons.check_circle_rounded,
-        color: const Color(0xFF22C55E),
-      ),
+  static const _green = Color(0xFF22C55E);
+  static const _red = Color(0xFFEF4444);
+  static const _amber = Color(0xFFF59E0B);
+
+  /// Green success toast (top, slides in from the left).
+  static void success(BuildContext context, String message) =>
+      _show(context, message, _green, Icons.check_circle_rounded);
+
+  /// Amber warning toast.
+  static void warn(BuildContext context, String message) =>
+      _show(context, message, _amber, Icons.warning_amber_rounded);
+
+  /// Red error toast with an optional RETRY action, classified for a friendly
+  /// message.
+  static void error(BuildContext context, Object e, {VoidCallback? onRetry}) {
+    final err = e is ApiException ? e : _classify(e);
+    _show(
+      context,
+      err.userMessage,
+      _red,
+      err.icon,
+      onRetry: (err.isRetryable && onRetry != null) ? onRetry : null,
     );
   }
 
-  /// Red error snackbar with icon and optional retry button
-  static void error(
+  /// Generic top toast. [isError] flips the colour/icon to the error style.
+  static void toast(
     BuildContext context,
-    Object e, {
+    String message, {
+    bool isError = false,
+    IconData? icon,
+    VoidCallback? onRetry,
+  }) {
+    _show(
+      context,
+      message,
+      isError ? _red : _green,
+      icon ??
+          (isError ? Icons.error_outline_rounded : Icons.check_circle_rounded),
+      onRetry: onRetry,
+    );
+  }
+
+  /// Top toast for an error object, classified into a friendly message.
+  static void toastError(BuildContext context, Object e) {
+    final err = e is ApiException ? e : _classify(e);
+    _show(context, err.userMessage, _red, err.icon);
+  }
+
+  /// Inserts the top toast into the root overlay.
+  static void _show(
+    BuildContext context,
+    String message,
+    Color color,
+    IconData icon, {
     VoidCallback? onRetry,
   }) {
     if (!context.mounted) return;
-    final err = e is ApiException ? e : _classify(e);
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      _snack(
-        message: err.userMessage,
-        icon: err.icon,
-        color: const Color(0xFFEF4444),
-        duration: const Duration(seconds: 5),
-        action: (err.isRetryable && onRetry != null)
-            ? SnackBarAction(
-                label: 'RETRY',
-                textColor: Colors.white,
-                onPressed: onRetry,
-              )
-            : null,
-      ),
-    );
-  }
-
-  /// Amber warning snackbar
-  static void warn(BuildContext context, String message) {
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      _snack(
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => _TopToast(
         message: message,
-        icon: Icons.warning_amber_rounded,
-        color: const Color(0xFFF59E0B),
+        color: color,
+        icon: icon,
+        onRetry: onRetry,
+        onDismissed: () => entry.remove(),
       ),
+    );
+    overlay.insert(entry);
+  }
+}
+
+/// A top-anchored toast that slides in from the left, holds, then slides out.
+/// Inserted via [AppFeedback.toast] into the root overlay.
+class _TopToast extends StatefulWidget {
+  final String message;
+  final Color color;
+  final IconData icon;
+  final VoidCallback onDismissed;
+  final VoidCallback? onRetry;
+
+  const _TopToast({
+    required this.message,
+    required this.color,
+    required this.icon,
+    required this.onDismissed,
+    this.onRetry,
+  });
+
+  @override
+  State<_TopToast> createState() => _TopToastState();
+}
+
+class _TopToastState extends State<_TopToast> with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<Offset> _slide;
+  late final Animation<double> _fade;
+  Timer? _timer;
+  bool _dismissing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 320),
+    );
+    _slide = Tween<Offset>(
+      begin: const Offset(-1.15, 0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _controller.forward();
+    // Errors with a retry action linger a touch longer.
+    _timer = Timer(
+      Duration(milliseconds: widget.onRetry != null ? 4200 : 2600),
+      _dismiss,
     );
   }
 
-  static SnackBar _snack({
-    required String message,
-    required IconData icon,
-    required Color color,
-    Duration duration = const Duration(seconds: 3),
-    SnackBarAction? action,
-  }) {
-    return SnackBar(
-      content: Row(
-        children: [
-          Icon(icon, color: Colors.white, size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                fontWeight: FontWeight.w500,
-                fontSize: 13,
+  Future<void> _dismiss() async {
+    if (_dismissing) return;
+    _dismissing = true;
+    _timer?.cancel();
+    if (mounted) await _controller.reverse();
+    widget.onDismissed();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final topInset = MediaQuery.of(context).padding.top;
+    return Positioned(
+      top: topInset + 12,
+      left: 16,
+      right: 16,
+      child: SlideTransition(
+        position: _slide,
+        child: FadeTransition(
+          opacity: _fade,
+          child: Material(
+            color: Colors.transparent,
+            child: GestureDetector(
+              onTap: _dismiss,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: widget.color,
+                  borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    BoxShadow(
+                      color: widget.color.withValues(alpha: 0.4),
+                      blurRadius: 16,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Icon(widget.icon, color: Colors.white, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        widget.message,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                    ),
+                    if (widget.onRetry != null) ...[
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () {
+                          widget.onRetry!();
+                          _dismiss();
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: const Text(
+                            'RETRY',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           ),
-        ],
+        ),
       ),
-      backgroundColor: color,
-      behavior: SnackBarBehavior.floating,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      duration: duration,
-      action: action,
     );
   }
 }

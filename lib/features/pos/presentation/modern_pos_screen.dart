@@ -168,13 +168,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
         }
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('AI added ${orders.length} items to order'),
-          backgroundColor: AppColors.success,
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      AppFeedback.success(context, 'AI added ${orders.length} items to order');
     } catch (e) {
       debugPrint('Cart parse error: $e');
     }
@@ -705,7 +699,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
               Switch(
                 value: _isVoiceAIEnabled,
                 onChanged: (val) => setState(() => _isVoiceAIEnabled = val),
-                activeColor: AppColors.primaryOrange,
+                activeThumbColor: AppColors.primaryOrange,
               ),
             ],
           ),
@@ -1162,10 +1156,11 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
   // ─── Responsive grid column count ───────────────────────
   int _gridCols(double w) {
-    if (w >= 900) return 7;
-    if (w >= 680) return 6;
-    if (w >= 480) return 5;
-    return 4;
+    if (w >= 1200) return 6;
+    if (w >= 900) return 5;
+    if (w >= 600) return 4;
+    if (w >= 450) return 3;
+    return 2;
   }
 
   bool _isNetworkError(Object e) {
@@ -1731,13 +1726,13 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
         // panel doesn't linger empty after a successful sale.
         final navigator = Navigator.of(context);
         if (navigator.canPop()) navigator.pop();
-        AppFeedback.success(
+        AppFeedback.toast(
           context,
           'Bill created • ₹${total.toStringAsFixed(0)} via $paymentMode',
         );
       }
     } catch (e) {
-      if (mounted) AppFeedback.error(context, e);
+      if (mounted) AppFeedback.toastError(context, e);
     } finally {
       _processingPayment.value = null;
     }

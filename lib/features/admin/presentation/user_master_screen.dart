@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/utils/api_helper.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 
@@ -393,34 +394,12 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
 
   void _showSuccess(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg, style: GoogleFonts.inter(fontSize: 13)),
-        backgroundColor: AppColors.success,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    AppFeedback.success(context, msg);
   }
 
   void _showError(String msg, {VoidCallback? onRetry}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg, style: GoogleFonts.inter(fontSize: 13)),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        duration: const Duration(seconds: 6),
-        action: onRetry != null
-            ? SnackBarAction(
-                label: 'RETRY',
-                textColor: Colors.white,
-                onPressed: onRetry,
-              )
-            : null,
-      ),
-    );
+    AppFeedback.toast(context, msg, isError: true, onRetry: onRetry);
   }
 
   // ─── Build ─────────────────────────────────────────────────────────────────

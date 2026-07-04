@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/utils/api_helper.dart';
+import '../../../core/widgets/network_error_view.dart';
 
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
@@ -175,7 +177,11 @@ class QuickBillScreen extends ConsumerWidget {
                   );
                 },
                 loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(child: Text('Error: $e')),
+                error: (e, _) => NetworkErrorView(
+                  error: e,
+                  onRetry: () =>
+                      ref.invalidate(itemGroupsProvider(user.companyId)),
+                ),
               ),
             ),
 
@@ -335,22 +341,10 @@ class QuickBillScreen extends ConsumerWidget {
       ref.read(cartProvider(null).notifier).clear();
       ref.read(discountProvider.notifier).reset();
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✓ ₹${total.toStringAsFixed(0)} via $mode'),
-            backgroundColor: AppColors.success,
-          ),
-        );
+        AppFeedback.success(context, '₹${total.toStringAsFixed(0)} via $mode');
       }
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
+      if (context.mounted) AppFeedback.toastError(context, e);
     }
   }
 

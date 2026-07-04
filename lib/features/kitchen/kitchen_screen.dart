@@ -7,6 +7,7 @@ import '../../core/theme/app_colors.dart';
 import '../../models/models.dart';
 import '../../providers/providers.dart';
 import '../../core/services/supabase_service.dart';
+import '../../core/utils/api_helper.dart';
 
 class KitchenScreen extends ConsumerStatefulWidget {
   final String companyId;
@@ -58,14 +59,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
       await SupabaseService.updateKotStatus(kot.id, newStatus);
       ref.invalidate(activeKotsProvider(widget.companyId));
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
+      if (mounted) AppFeedback.toastError(context, e);
     }
   }
 
@@ -78,14 +72,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
       await SupabaseService.updateKotItemStatus(item.id, newStatus);
       ref.invalidate(activeKotsProvider(widget.companyId));
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
-      }
+      if (mounted) AppFeedback.toastError(context, e);
     }
   }
 

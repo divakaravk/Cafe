@@ -82,6 +82,9 @@ class UserProfile {
   });
 
   bool get isAdmin => role.toLowerCase() == 'admin';
+  /// Platform/app owner — not tied to any company. Approves new-company
+  /// registrations from a dedicated dashboard.
+  bool get isOwner => role.toLowerCase() == 'owner';
   bool get isManager => role.toLowerCase() == 'manager';
   bool get isCashier => role.toLowerCase() == 'cashier';
   bool get isWaiter => role.toLowerCase() == 'waiter';
@@ -89,7 +92,8 @@ class UserProfile {
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
     id: json['id'] as String,
-    companyId: json['company_id'] as String,
+    // The app owner has no company, so this can be null in the DB.
+    companyId: json['company_id'] as String? ?? '',
     role: json['user_role'] as String? ?? 'cashier',
     fullName: json['user_name'] as String? ?? '',
     employeeCode: json['employee_code'] as String? ?? '',
@@ -1009,6 +1013,7 @@ class Bill {
   final double totalAmount;
   final String paymentMode;
   final bool isVoided;
+  final String status;
   final String? tableName;
   final int? coverNumber;
   final String? coverLabel;
@@ -1029,9 +1034,17 @@ class Bill {
     required this.totalAmount,
     this.paymentMode = 'CASH',
     this.isVoided = false,
+    this.status = 'paid',
     this.items = const [],
     this.createdAt,
   });
+
+  /// True when the bill has been cancelled/voided. Such bills stay in the
+  /// ledger for audit but are excluded from revenue totals.
+  bool get isCancelled {
+    final s = status.toLowerCase();
+    return isVoided || s == 'cancelled' || s == 'void' || s == 'cancel';
+  }
 
   String get coverDisplayName {
     if (coverNumber == null) return '';
@@ -1040,8 +1053,8 @@ class Bill {
   }
 
   factory Bill.fromJson(Map<String, dynamic> json) => Bill(
-    id: json['id'] as String,
-    companyId: json['company_id'] as String,
+    id: json['id'] as String? ?? '',
+    companyId: json['company_id'] as String? ?? '',
     orderId: json['order_id'] as String?,
     billNumber: json['bill_number']?.toString(),
     subtotal: (json['subtotal'] as num?)?.toDouble() ?? 0,
@@ -1049,6 +1062,7 @@ class Bill {
     discountAmount: (json['discount_amount'] as num?)?.toDouble() ?? 0,
     totalAmount: (json['total_amount'] as num?)?.toDouble() ?? 0,
     paymentMode: json['payment_mode'] as String? ?? 'CASH',
+    status: json['status'] as String? ?? 'paid',
     tableName:
         json['table_session'] != null &&
                 json['table_session']['table_master'] != null
@@ -1103,9 +1117,10 @@ class BillItem {
   double get taxAmount => total * (taxPercentage / 100);
 
   factory BillItem.fromJson(Map<String, dynamic> json) => BillItem(
-    id: json['id'] as String,
-    billId: json['bill_id'] as String,
-    itemId: json['item_id'] as String,
+    id: json['id'] as String? ?? '',
+    billId: json['bill_id'] as String? ?? '',
+    // item_id can be null for bills whose menu item was later deleted.
+    itemId: json['item_id'] as String? ?? '',
     itemName: json['item_name_snapshot'] as String?,
     qty: (json['qty'] as num?)?.toDouble() ?? 1.0,
     rate: (json['rate_snapshot'] as num?)?.toDouble() ?? 0,

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme/app_theme.dart';
 import 'core/services/supabase_service.dart';
+import 'core/services/push_service.dart';
 import 'providers/providers.dart';
 import 'home_shell.dart';
 
@@ -13,6 +14,9 @@ void main() async {
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
   await SupabaseService.init();
+  // Best-effort: enables registration-OTP push on owner/super-admin devices.
+  // No-ops gracefully when Firebase isn't configured for the platform yet.
+  await PushService.init();
   runApp(const ProviderScope(child: CafePosApp()));
 }
 

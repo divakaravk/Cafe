@@ -11,6 +11,9 @@ final authStateProvider =
 
 class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
   static const _sessionKey = 'user_session';
+  // The last_login this device recorded at sign-in. If the server's last_login
+  // later differs, someone signed in elsewhere and this device is stale.
+  static const _lastLoginKey = 'session_last_login';
 
   @override
   AsyncValue<UserProfile?> build() {
@@ -66,6 +69,10 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
 
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(_sessionKey, jsonEncode(profileJson));
+      await prefs.setString(
+        _lastLoginKey,
+        profileJson['last_login']?.toString() ?? '',
+      );
 
       await _syncPermissions(profile);
       state = AsyncValue.data(profile);
@@ -79,20 +86,95 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
     await _loadInitialSession();
   }
 
-  Future<void> signOut() async {
-    // Clear is_login flag in DB (best-effort)
+  /// Signs the user out. [clearRemote] clears the DB is_login flag; pass false
+  /// when another device has taken over the session (it now owns is_login, so
+  /// we must not reset it and log that device out too).
+  Future<void> signOut({bool clearRemote = true}) async {
     final currentUser = state.value;
-    if (currentUser != null) {
+    if (clearRemote && currentUser != null) {
       try {
         await SupabaseService.setLoginStatus(currentUser.id, false);
       } catch (_) {}
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_sessionKey);
+    await prefs.remove(_lastLoginKey);
     await ref.read(permissionsProvider.notifier).clear();
-    await SupabaseService.signOut();
+    try {
+      await SupabaseService.signOut();
+    } catch (_) {}
     state = const AsyncValue.data(null);
   }
+
+  /// Verifies the live session against the server. If the account was
+  /// deactivated, force-logged-out, or signed in on another device, this signs
+  /// out locally and publishes a reason via [sessionKickProvider] so the login
+  /// screen can show a toast. Network errors are ignored (no false kicks).
+  Future<void> validateSession() async {
+    final user = state.value;
+    if (user == null) return;
+
+    Map<String, dynamic>? status;
+    try {
+      status = await SupabaseService.getUserSessionStatus(user.id);
+    } catch (_) {
+      return; // offline / transient — don't kick the user out
+    }
+    if (status == null) return;
+
+    final active = status['user_active'] as bool? ?? true;
+    final isLogin = status['is_login'] as bool? ?? true;
+    final serverLast = status['last_login']?.toString();
+
+    final prefs = await SharedPreferences.getInstance();
+    final localLast = prefs.getString(_lastLoginKey);
+
+    String? reason;
+    bool clearRemote = true;
+    if (!active) {
+      reason = 'Your account is inactive. Contact your administrator.';
+    } else if (serverLast != null &&
+        localLast != null &&
+        localLast.isNotEmpty &&
+        !_sameInstant(serverLast, localLast)) {
+      // A newer login exists elsewhere — that device owns the session now.
+      // Compare as instants, not raw strings: this device records Dart's ISO
+      // form ("…Z") at sign-in while the server re-reads PostgREST's form
+      // ("…+00:00"), which represent the same moment in different text.
+      reason = 'You have been logged in on another device.';
+      clearRemote = false;
+    } else if (!isLogin) {
+      reason = 'Your session has ended. Please sign in again.';
+    }
+
+    if (reason != null) {
+      await signOut(clearRemote: clearRemote);
+      ref.read(sessionKickProvider.notifier).set(reason);
+    }
+  }
+
+  /// True when two timestamp strings refer to the same moment, tolerating
+  /// representation differences (e.g. "…Z" vs "…+00:00", trimmed fractional
+  /// zeros). Falls back to exact string equality if either fails to parse.
+  static bool _sameInstant(String a, String b) {
+    final da = DateTime.tryParse(a);
+    final db = DateTime.tryParse(b);
+    if (da == null || db == null) return a == b;
+    return da.toUtc().isAtSameMomentAs(db.toUtc());
+  }
+}
+
+// ─── SESSION KICK MESSAGE ────────────────────────────────
+// Set when the session guard logs the user out (inactive / another device).
+// The login screen shows it as a toast then clears it.
+final sessionKickProvider =
+    NotifierProvider<SessionKickNotifier, String?>(SessionKickNotifier.new);
+
+class SessionKickNotifier extends Notifier<String?> {
+  @override
+  String? build() => null;
+  void set(String? message) => state = message;
+  void clear() => state = null;
 }
 
 // ─── CURRENT USER PERMISSIONS ────────────────────────────
@@ -203,6 +285,16 @@ final tablesProvider = FutureProvider.family<List<CafeTable>, String>((
 ) async {
   final res = await SupabaseService.getTables(companyId);
   return res.map((e) => CafeTable.fromJson(e)).toList();
+});
+
+// ─── COMPANY USERS ───────────────────────────────────────
+// Staff of a company, used by the Stock module (staff filters, shift handover).
+final companyUsersProvider = FutureProvider.family<List<UserProfile>, String>((
+  ref,
+  companyId,
+) async {
+  final res = await SupabaseService.getUsersForCompany(companyId);
+  return res.map((e) => UserProfile.fromJson(e)).toList();
 });
 
 // ─── CART ────────────────────────────────────────────────

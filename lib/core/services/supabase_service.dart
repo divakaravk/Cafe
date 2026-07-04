@@ -73,6 +73,19 @@ class SupabaseService {
         .eq('id', userId);
   }
 
+  /// Live session status for the signed-in user — used by the app's session
+  /// guard to detect deactivation, admin force-logout, or a login from another
+  /// device (a newer last_login than the one this device recorded).
+  static Future<Map<String, dynamic>?> getUserSessionStatus(
+    String userId,
+  ) async {
+    return await client
+        .from('user_profiles')
+        .select('user_active, is_login, last_login')
+        .eq('id', userId)
+        .maybeSingle();
+  }
+
   static Future<void> signOut() async {
     await client.auth.signOut();
   }
@@ -115,24 +128,25 @@ class SupabaseService {
     required Map<String, dynamic> permissionData,
     required bool isNew,
   }) async {
+    permissionData['user_id'] = userData['id'];
     if (isNew) {
       // 1. Insert User
       await client.from('user_profiles').insert(userData);
-
-      // 2. Insert Permissions
-      permissionData['user_id'] = userData['id'];
-      await client.from('user_permission').insert(permissionData);
     } else {
       // 1. Update User
       await client
           .from('user_profiles')
           .update(userData)
           .eq('id', userData['id']);
-
-      // 2. Upsert Permissions (easier to upsert permissions since they might not exist yet)
-      permissionData['user_id'] = userData['id'];
-      await client.from('user_permission').upsert(permissionData);
     }
+
+    // 2. Upsert Permissions — idempotent on user_id so it works whether the
+    // row was just created, already seeded by a DB trigger, or left over from a
+    // previous partial save. A plain insert here throws a duplicate-key error
+    // when a permission row for this user already exists.
+    await client
+        .from('user_permission')
+        .upsert(permissionData, onConflict: 'user_id');
   }
 
   static Future<String> uploadAvatar(
@@ -171,6 +185,83 @@ class SupabaseService {
     Map<String, dynamic> data,
   ) async {
     await client.from('company_master').update(data).eq('id', companyId);
+  }
+
+  // ─── COMPANY SELF-REGISTRATION ─────────────────────────
+  /// Creates an unverified/inactive company + a registration request carrying a
+  /// fresh OTP. A DB webhook pushes that OTP to super-admin devices via FCM.
+  /// Returns { registration_id, company_id }.
+  static Future<Map<String, dynamic>> requestCompanyRegistration({
+    required Map<String, dynamic> company,
+    required Map<String, dynamic> owner,
+  }) async {
+    final res = await client.rpc(
+      'request_company_registration',
+      params: {'p_company': company, 'p_owner': owner},
+    );
+    return Map<String, dynamic>.from(res as Map);
+  }
+
+  /// Verifies the OTP for a registration. On success the company is flipped to
+  /// verified + active. Returns { ok, company_id?, reason? }.
+  static Future<Map<String, dynamic>> verifyCompanyRegistrationOtp({
+    required String registrationId,
+    required String code,
+  }) async {
+    final res = await client.rpc(
+      'verify_company_registration_otp',
+      params: {'p_registration_id': registrationId, 'p_code': code},
+    );
+    return Map<String, dynamic>.from(res as Map);
+  }
+
+  /// Registers this device's FCM token as an owner/super-admin recipient for
+  /// new-company registration OTPs.
+  static Future<void> registerSuperAdminDevice(String token, {String? label}) async {
+    await client.rpc(
+      'register_super_admin_device',
+      params: {'p_token': token, 'p_label': label},
+    );
+  }
+
+  /// App-owner dashboard: recent company-registration requests.
+  static Future<List<Map<String, dynamic>>> listCompanyRegistrations({
+    int limit = 50,
+  }) async {
+    final res = await client.rpc(
+      'list_company_registrations',
+      params: {'p_limit': limit},
+    );
+    return List<Map<String, dynamic>>.from(res as List);
+  }
+
+  /// App-owner override: approve a registration without the OTP step (activates
+  /// the company directly). Returns { ok, company_id? }.
+  static Future<Map<String, dynamic>> approveCompanyRegistration(
+    String registrationId,
+  ) async {
+    final res = await client.rpc(
+      'approve_company_registration',
+      params: {'p_registration_id': registrationId},
+    );
+    return Map<String, dynamic>.from(res as Map);
+  }
+
+  /// Changes a user's password, but only if [currentPassword] matches the stored
+  /// one (enforced in the WHERE clause). Returns true on success, false when the
+  /// current password is wrong.
+  static Future<bool> changePassword({
+    required String userId,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    final rows = await client
+        .from('user_profiles')
+        .update({'password': newPassword})
+        .eq('id', userId)
+        .eq('password', currentPassword)
+        .select('id');
+    return (rows as List).isNotEmpty;
   }
 
   // ─── ITEMS ─────────────────────────────────────────────
@@ -648,6 +739,7 @@ class SupabaseService {
         'payment_mode': paymentMode.toLowerCase(),
         'discount_amount': discountAmount,
         'total_amount': finalTotal,
+        'bill_date': now.toIso8601String(),
       }).eq('id', billId),
       updateCoverStatus(coverId, 'billed'),
     ]);
@@ -724,29 +816,29 @@ class SupabaseService {
         : "${now.year - 1}-${now.year % 100}";
 
     try {
-      // Parallel: fetch company code + latest bill number in one shot
-      final fyStart = DateTime(now.month >= 4 ? now.year : now.year - 1, 4, 1);
-      final results = await Future.wait([
-        client
-            .from('company_master')
-            .select('company_code')
-            .eq('id', companyId)
-            .maybeSingle(),
-        client
-            .from('bill_master')
-            .select('bill_number')
-            .eq('company_id', companyId)
-            .gte('bill_date', fyStart.toIso8601String())
-            .order('bill_date', ascending: false)
-            .limit(1),
-      ]);
+      final companyRes = await client
+          .from('company_master')
+          .select('company_code')
+          .eq('id', companyId)
+          .maybeSingle();
 
-      String prefix = (results[0] as Map?)?['company_code'] ?? 'POS';
+      String prefix = (companyRes?['company_code'] as String?) ?? 'POS';
       if (prefix.isEmpty) prefix = 'POS';
 
+      // Find the highest existing sequence by matching the bill_number pattern
+      // for this FY — NOT by bill_date. Legacy bills can have a null bill_date,
+      // and ordering by it would miss them and regenerate an already-used number
+      // (a duplicate-key error on save). bill_number itself is always present.
+      final latestBills = await client
+          .from('bill_master')
+          .select('bill_number')
+          .eq('company_id', companyId)
+          .ilike('bill_number', '$prefix/$fy/%')
+          .order('bill_number', ascending: false)
+          .limit(1);
+
       int sequence = 1;
-      final latestBills = results[1] as List;
-      if (latestBills.isNotEmpty) {
+      if ((latestBills as List).isNotEmpty) {
         final parts = (latestBills[0]['bill_number'] as String).split('/');
         if (parts.length == 3) sequence = (int.tryParse(parts[2]) ?? 0) + 1;
       }
@@ -754,7 +846,7 @@ class SupabaseService {
       return '$prefix/$fy/${sequence.toString().padLeft(3, '0')}';
     } catch (_) {
       final ts = now.millisecondsSinceEpoch.toString();
-      return 'BILL/${now.year}${now.month.toString().padLeft(2,'0')}${now.day.toString().padLeft(2,'0')}/${ts.substring(ts.length - 4)}';
+      return 'BILL/${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}/${ts.substring(ts.length - 4)}';
     }
   }
 
@@ -839,6 +931,9 @@ class SupabaseService {
           'total_amount': totalAmount,
           'payment_mode': paymentMode.toLowerCase(),
           'status': 'paid', // Defaulting to paid for POS checkout
+          // Stamp the billing date explicitly — reports filter/sort on
+          // bill_date, so a null here hides the bill from every report.
+          'bill_date': now.toIso8601String(),
         })
         .select()
         .single();
@@ -880,6 +975,78 @@ class SupabaseService {
 
     final res = await query.order('bill_date', ascending: false);
     return List<Map<String, dynamic>>.from(res);
+  }
+
+  /// Cancels (voids) a finalized bill. The row is kept for audit — it is
+  /// marked cancelled/voided rather than deleted, so reports can still show it
+  /// while excluding it from revenue totals.
+  static Future<void> cancelBill({
+    required String billId,
+    String? reason,
+  }) async {
+    // Only the `status` column is touched — it definitely exists and is already
+    // written across the codebase. Optional [reason] is appended to `notes`.
+    final data = <String, dynamic>{'status': 'cancelled'};
+    if (reason != null && reason.isNotEmpty) {
+      data['notes'] = 'Cancelled: $reason';
+    }
+    await client.from('bill_master').update(data).eq('id', billId);
+  }
+
+  /// Edits a finalized bill's line items: deletes [removedItemIds], updates the
+  /// quantities of [items], then recomputes and writes back the bill totals.
+  /// Each entry in [items] must contain: id, qty, rate, gst_rate.
+  static Future<void> updateBill({
+    required String billId,
+    required List<Map<String, dynamic>> items,
+    List<String> removedItemIds = const [],
+    double discountAmount = 0,
+  }) async {
+    if (removedItemIds.isNotEmpty) {
+      await client.from('bill_item').delete().inFilter('id', removedItemIds);
+    }
+
+    double subtotal = 0;
+    double totalCgst = 0;
+    double totalSgst = 0;
+
+    for (final it in items) {
+      final qty = (it['qty'] as num).toDouble();
+      final rate = (it['rate'] as num).toDouble();
+      final gstRate = (it['gst_rate'] as num?)?.toDouble() ?? 0;
+      final line = qty * rate;
+      final tax = line * (gstRate / 100);
+      final cgst = tax / 2;
+      final sgst = tax / 2;
+
+      subtotal += line;
+      totalCgst += cgst;
+      totalSgst += sgst;
+
+      await client
+          .from('bill_item')
+          .update({
+            'qty': qty,
+            'gross_amount': line,
+            'cgst_amount': cgst,
+            'sgst_amount': sgst,
+            'net_amount': line + tax,
+          })
+          .eq('id', it['id']);
+    }
+
+    final total = subtotal + totalCgst + totalSgst - discountAmount;
+    await client
+        .from('bill_master')
+        .update({
+          'subtotal': subtotal,
+          'taxable_amount': subtotal,
+          'cgst_amount': totalCgst,
+          'sgst_amount': totalSgst,
+          'discount_amount': discountAmount,
+          'total_amount': total < 0 ? 0 : total,
+        })
+        .eq('id', billId);
   }
 
   // ─── KOT ────────────────────────────────────────────────
@@ -978,6 +1145,7 @@ class SupabaseService {
       'payment_mode': paymentMode.toLowerCase(),
       'discount_amount': discountAmount,
       'total_amount': finalTotal,
+      'bill_date': now.toIso8601String(),
     }).eq('id', billId);
 
     await client.from('table_session').update({
@@ -996,6 +1164,11 @@ class SupabaseService {
     required List<dynamic> cart, // List<CartItem>
     String? coverId,
   }) async {
+    // Kick off the KOT-number lookup immediately (only needs companyId) so it
+    // resolves in the background while we build the session/cover/bill chain,
+    // keeping it off the critical path.
+    final kotNumberFuture = _generateKotNumber(companyId);
+
     // 1. Reuse existing open session, or create a new one
     final existingSessions = await client
         .from('table_session')
@@ -1129,38 +1302,44 @@ class SupabaseService {
             'total_amount': subtotal + totalCgst + totalSgst,
             'payment_mode': 'cash',
             'status': 'open',
+            // Stamp at creation so the bill is never invisible to reports
+            // (which filter/sort on bill_date); refined to the payment time
+            // on checkout below.
+            'bill_date': DateTime.now().toIso8601String(),
           })
           .select()
           .single();
       billId = bill['id'] as String;
     }
 
-    // 4. Insert bill_items and generate KOT number in parallel
+    // 4 + 5. The bill_items and the kot_master only depend on billId, so insert
+    // them in parallel instead of sequentially (the KOT number is already
+    // resolving from the start of the method).
     for (final item in billItemsData) {
       item['bill_id'] = billId;
     }
-    final step4 = await Future.wait<dynamic>([
-      client.from('bill_item').insert(billItemsData).select('id, item_id, variant_id'),
-      _generateKotNumber(companyId),
+    final kotNumber = await kotNumberFuture;
+    final step45 = await Future.wait<dynamic>([
+      client
+          .from('bill_item')
+          .insert(billItemsData)
+          .select('id, item_id, variant_id'),
+      client
+          .from('kot_master')
+          .insert({
+            'company_id': companyId,
+            'bill_id': billId,
+            'table_session_id': sessionId,
+            'cover_id': effectiveCoverId,
+            'kot_number': kotNumber,
+            'status': 'pending',
+            'created_by': openedBy,
+          })
+          .select('id')
+          .single(),
     ]);
-    final insertedItems = step4[0] as List;
-    final kotNumber = step4[1] as String;
-
-    // 5. Create kot_master
-    final kot = await client
-        .from('kot_master')
-        .insert({
-          'company_id': companyId,
-          'bill_id': billId,
-          'table_session_id': sessionId,
-          'cover_id': effectiveCoverId,
-          'kot_number': kotNumber,
-          'status': 'pending',
-          'created_by': openedBy,
-        })
-        .select()
-        .single();
-    final kotId = kot['id'] as String;
+    final insertedItems = step45[0] as List;
+    final kotId = (step45[1] as Map)['id'] as String;
 
     // 6. Create kot_items linked to bill_items
     final cartList = cart;
@@ -1251,5 +1430,178 @@ class SupabaseService {
         .select()
         .eq('company_id', companyId)
         .maybeSingle();
+  }
+
+  // ─── INVENTORY: RAW MATERIAL ───────────────────────────
+  /// Active raw materials for a company, ordered by name. Returns raw rows;
+  /// callers map to [RawMaterial].
+  static Future<List<Map<String, dynamic>>> getRawMaterials(
+    String companyId,
+  ) async {
+    final res = await client
+        .from('raw_material')
+        .select()
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .order('name');
+    return List<Map<String, dynamic>>.from(res);
+  }
+
+  static Future<void> upsertRawMaterial(Map<String, dynamic> data) async {
+    await client.from('raw_material').upsert(data, onConflict: 'id');
+  }
+
+  /// Soft delete — keeps the row (and any recipe history) but hides it from
+  /// the active list.
+  static Future<void> deleteRawMaterial(String id) async {
+    await client.from('raw_material').update({'is_active': false}).eq('id', id);
+  }
+
+  // ─── INVENTORY: RECIPE ─────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getRecipeForVariant(
+    String itemVariantId,
+  ) async {
+    final res = await client
+        .from('variant_recipe')
+        .select()
+        .eq('item_variant_id', itemVariantId);
+    return List<Map<String, dynamic>>.from(res);
+  }
+
+  static Future<void> upsertRecipeLine(Map<String, dynamic> data) async {
+    await client.from('variant_recipe').upsert(data, onConflict: 'id');
+  }
+
+  static Future<void> deleteRecipeLine(String id) async {
+    await client.from('variant_recipe').delete().eq('id', id);
+  }
+
+  /// Count how many recipe lines reference a raw material — used to warn before
+  /// deactivating a material that is still part of recipes.
+  static Future<int> countRecipeLinesUsingMaterial(String rawMaterialId) async {
+    final res = await client
+        .from('variant_recipe')
+        .select('id')
+        .eq('raw_material_id', rawMaterialId);
+    return List<Map<String, dynamic>>.from(res).length;
+  }
+
+  // ─── INVENTORY: STOCK VIEWS ────────────────────────────
+  static Future<List<Map<String, dynamic>>> getCurrentStock(
+    String companyId,
+  ) async {
+    final res = await client
+        .from('v_current_stock')
+        .select()
+        .eq('company_id', companyId)
+        .order('name');
+    return List<Map<String, dynamic>>.from(res);
+  }
+
+  /// Per-staff, per-material consumption.
+  ///
+  /// Without a date range we read the all-time `v_staff_consumption` view
+  /// directly. With a range we aggregate `stock_ledger` consumed rows in Dart
+  /// (the Supabase client can't GROUP BY), resolving material + staff names
+  /// from lookup maps so we don't depend on view/FK names. Returns rows shaped
+  /// for [StaffConsumptionRow].
+  static Future<List<Map<String, dynamic>>> getStaffConsumption(
+    String companyId, {
+    DateTime? from,
+    DateTime? to,
+    String? staffId,
+  }) async {
+    if (from == null && to == null) {
+      final base = client
+          .from('v_staff_consumption')
+          .select()
+          .eq('company_id', companyId);
+      final res = await (staffId != null
+          ? base.eq('staff_id', staffId)
+          : base);
+      return List<Map<String, dynamic>>.from(res);
+    }
+
+    // Date-filtered: pull consumed ledger rows in range.
+    var query = client
+        .from('stock_ledger')
+        .select('staff_id, raw_material_id, qty')
+        .eq('company_id', companyId)
+        .eq('movement_type', 'consumed');
+    if (from != null) {
+      query = query.gte('created_at', from.toUtc().toIso8601String());
+    }
+    if (to != null) {
+      query = query.lte('created_at', to.toUtc().toIso8601String());
+    }
+    if (staffId != null) {
+      query = query.eq('staff_id', staffId);
+    }
+    final rows = List<Map<String, dynamic>>.from(await query);
+
+    // Lookups for labelling (names + units).
+    final materials = await client
+        .from('raw_material')
+        .select('id, name, unit')
+        .eq('company_id', companyId);
+    final matById = {
+      for (final m in List<Map<String, dynamic>>.from(materials))
+        m['id'] as String: m,
+    };
+    final users = await client
+        .from('user_profiles')
+        .select('id, user_name')
+        .eq('company_id', companyId);
+    final userById = {
+      for (final u in List<Map<String, dynamic>>.from(users))
+        u['id'] as String: u['user_name'] as String?,
+    };
+
+    // Aggregate by (staff, material). Consumed qty is stored negative, so the
+    // consumed total is the negated sum.
+    final grouped = <String, Map<String, dynamic>>{};
+    for (final r in rows) {
+      final sId = r['staff_id'] as String?;
+      final mId = r['raw_material_id'] as String? ?? '';
+      final key = '${sId ?? 'unknown'}|$mId';
+      final qty = (r['qty'] as num?)?.toDouble() ?? 0;
+      final mat = matById[mId];
+      final agg = grouped.putIfAbsent(
+        key,
+        () => {
+          'staff_id': sId,
+          'staff_name': userById[sId],
+          'raw_material_id': mId,
+          'raw_material_name': mat?['name'] ?? '',
+          'unit': mat?['unit'] ?? 'unit',
+          'total_consumed': 0.0,
+        },
+      );
+      agg['total_consumed'] = (agg['total_consumed'] as double) - qty;
+    }
+    return grouped.values.toList();
+  }
+
+  // ─── INVENTORY: STOCK ADJUSTMENT ───────────────────────
+  /// Inserts a manual stock movement (day-end count, shift handover, etc.).
+  /// Positive [qty] adds stock; negative records consumption / variance loss.
+  static Future<void> submitStockAdjustment({
+    required String companyId,
+    required String rawMaterialId,
+    required double qty,
+    String movementType = 'adjustment',
+    String? note,
+    String? shiftLabel,
+    String? staffId,
+  }) async {
+    await client.from('stock_ledger').insert({
+      'company_id': companyId,
+      'raw_material_id': rawMaterialId,
+      'movement_type': movementType,
+      'qty': qty,
+      'note': note,
+      'shift_label': shiftLabel,
+      'staff_id': staffId,
+    });
   }
 }

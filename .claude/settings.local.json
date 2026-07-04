@@ -21,7 +21,19 @@
       "Bash(python *)",
       "Bash(echo \"exit:$?\")",
       "Bash(git check-ignore *)",
-      "PowerShell(flutter analyze *)"
+      "PowerShell(flutter analyze *)",
+      "Bash(flutter pub *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(echo \"tracked-check: $?\")",
+      "Bash(command -v supabase)",
+      "Bash(command -v curl)",
+      "Bash(command -v docker)",
+      "Bash(docker --version)",
+      "Bash(export SBP=\"sbp_a34f878a6d1ed635d0249ef1ea7817fca9f36972\")",
+      "Bash(export REF=\"vsbjkytdqhzbtideebwy\")",
+      "Bash(command -v jq)",
+      "Bash(command -v python)",
+      "Bash(command -v python3)"
     ]
   },
   "disabledMcpjsonServers": [

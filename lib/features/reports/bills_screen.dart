@@ -10,7 +10,10 @@ import 'package:printing/printing.dart';
 import '../../core/theme/app_colors.dart';
 import '../../models/models.dart';
 import '../../providers/report_provider.dart';
-import '../../providers/providers.dart' show allItemsProvider;
+import '../../providers/providers.dart'
+    show allItemsProvider, permissionsProvider, companyProvider;
+import '../../core/services/supabase_service.dart';
+import '../../core/utils/api_helper.dart';
 import 'widgets/report_widgets.dart';
 
 class BillsScreen extends ConsumerStatefulWidget {
@@ -711,7 +714,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
           FilterChipWidget(
             label:
                 state.filter == ReportDateFilter.custom &&
-                    state.startDate != null
+                    state.startDate != null &&
+                    state.endDate != null
                 ? '${DateFormat('d MMM').format(state.startDate!)} - ${DateFormat('d MMM').format(state.endDate!)}'
                 : 'Custom Range',
             isSelected: state.filter == ReportDateFilter.custom,
@@ -1075,11 +1079,15 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
     bool isDark,
     DateFormat dateFormat,
   ) {
+    final perms = ref.read(permissionsProvider);
+    final canEdit = perms?.canEditBill ?? false;
+    final canCancel = perms?.canCancelBill ?? false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => Container(
+      builder: (sheetContext) => Container(
         decoration: BoxDecoration(
           color: isDark ? AppColors.darkSurface : Colors.white,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
@@ -1155,6 +1163,41 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 ),
               ],
             ),
+            if (bill.isCancelled) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: AppColors.error.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.cancel_rounded,
+                      color: AppColors.error,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'This bill has been cancelled',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.error,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const Divider(height: 40),
             // Items
             ...bill.items.map(
@@ -1252,9 +1295,171 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 ],
               ),
             ),
+            // Edit / Cancel actions — only for live bills the user is allowed
+            // to modify. Cancelled bills are read-only.
+            if (!bill.isCancelled && (canEdit || canCancel)) ...[
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  if (canEdit)
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(sheetContext);
+                          _editBill(bill, isDark, dateFormat);
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: isDark
+                              ? AppColors.primaryAmber
+                              : AppColors.primaryOrange,
+                          side: BorderSide(
+                            color: isDark
+                                ? AppColors.primaryAmber
+                                : AppColors.primaryOrange,
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.edit_rounded, size: 18),
+                        label: Text(
+                          'Edit Bill',
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (canEdit && canCancel) const SizedBox(width: 12),
+                  if (canCancel)
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () => _cancelBill(sheetContext, bill),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.error,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        icon: const Icon(Icons.cancel_rounded, size: 18),
+                        label: Text(
+                          'Cancel Bill',
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
             const SizedBox(height: 24),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Confirms then cancels (voids) a bill. The [sheetContext] is the bill
+  /// detail sheet, popped on success.
+  Future<void> _cancelBill(BuildContext sheetContext, Bill bill) async {
+    final confirmed = await showDialog<bool>(
+      context: sheetContext,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? AppColors.darkSurface : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.error.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.cancel_rounded,
+                  color: AppColors.error,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Cancel Bill?',
+                style: GoogleFonts.inter(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            'Bill #${bill.billNumber ?? '-'} (₹${bill.totalAmount.toStringAsFixed(0)}) will be marked cancelled and removed from revenue totals. This cannot be undone.',
+            style: GoogleFonts.inter(fontSize: 13),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(
+                'Keep Bill',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(
+                'Cancel Bill',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      await SupabaseService.cancelBill(billId: bill.id);
+      await ref.read(reportProvider(widget.companyId).notifier).fetchReport();
+      if (sheetContext.mounted) Navigator.pop(sheetContext);
+      if (mounted) {
+        AppFeedback.success(
+          context,
+          'Bill #${bill.billNumber ?? '-'} cancelled',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        AppFeedback.toast(context, 'Failed to cancel bill: $e', isError: true);
+      }
+    }
+  }
+
+  void _editBill(Bill bill, bool isDark, DateFormat dateFormat) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _BillEditSheet(
+        bill: bill,
+        companyId: widget.companyId,
+        isDark: isDark,
       ),
     );
   }
@@ -1312,73 +1517,301 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
     ReportState reportState,
     Map<String, String> itemToCategory,
   ) async {
-    final pdf = pw.Document();
+    // ── Brand palette (restrained, corporate) ───────────────────────
+    const slate = PdfColor.fromInt(0xFF0F172A); // header band / table head
+    const orange = PdfColor.fromInt(0xFFEA580C); // brand accent
+    const dark = PdfColor.fromInt(0xFF1F2937); // body text
+    const muted = PdfColor.fromInt(0xFF6B7280); // secondary text
+    const line = PdfColor.fromInt(0xFFE5E7EB); // hairlines / borders
+    const stripe = PdfColor.fromInt(0xFFF8FAFC); // zebra rows
+    const green = PdfColor.fromInt(0xFF059669);
+    const blue = PdfColor.fromInt(0xFF2563EB);
+    const amber = PdfColor.fromInt(0xFFD97706);
+    const red = PdfColor.fromInt(0xFFDC2626);
+
+    // ── Data (exclude cancelled bills from money figures) ───────────
+    final company = ref.read(companyProvider(widget.companyId)).value;
+    final companyName = company?.companyName ?? 'Sales Report';
+    final validBills = reportState.validBills;
 
     final totalRevenue = reportState.totalRevenue;
     final totalOrders = reportState.totalOrders;
     final cashTotal = reportState.cashTotal;
     final upiTotal = reportState.upiTotal;
     final cardTotal = reportState.cardTotal;
-    final totalTax = reportState.bills.fold<double>(
-      0.0,
-      (sum, b) => sum + b.taxAmount,
-    );
-    final totalDiscount = reportState.bills.fold<double>(
-      0.0,
-      (sum, b) => sum + b.discountAmount,
-    );
+    final totalTax = validBills.fold<double>(0.0, (s, b) => s + b.taxAmount);
+    final totalDiscount =
+        validBills.fold<double>(0.0, (s, b) => s + b.discountAmount);
     final aov = totalOrders > 0 ? totalRevenue / totalOrders : 0.0;
 
-    // Category Sales
-    final Map<String, double> categorySales = {};
-    for (var bill in reportState.bills) {
-      for (var item in bill.items) {
-        final category = itemToCategory[item.itemId] ?? 'Uncategorized';
-        categorySales[category] = (categorySales[category] ?? 0.0) + item.total;
-      }
-    }
+    String money(num v) => 'Rs ${v.toStringAsFixed(2)}';
+    String moneyShort(num v) => 'Rs ${v.toStringAsFixed(0)}';
+    String pct(num part) =>
+        totalRevenue > 0 ? '${(part / totalRevenue * 100).toStringAsFixed(1)}%' : '0%';
 
-    // Top Selling Items
-    final Map<String, int> itemQuantities = {};
-    for (var bill in reportState.bills) {
-      for (var item in bill.items) {
-        final name = item.itemName ?? 'Unknown Item';
-        itemQuantities[name] = (itemQuantities[name] ?? 0) + item.qty.toInt();
+    // Category sales
+    final Map<String, double> categorySales = {};
+    for (final bill in validBills) {
+      for (final item in bill.items) {
+        final c = itemToCategory[item.itemId] ?? 'Uncategorized';
+        categorySales[c] = (categorySales[c] ?? 0.0) + item.total;
       }
     }
-    final topItems = itemQuantities.entries.toList()
+    final sortedCategories = categorySales.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    // Top selling items (qty + revenue)
+    final Map<String, int> itemQty = {};
+    final Map<String, double> itemRev = {};
+    for (final bill in validBills) {
+      for (final item in bill.items) {
+        final name = item.itemName ?? 'Unknown Item';
+        itemQty[name] = (itemQty[name] ?? 0) + item.qty.toInt();
+        itemRev[name] = (itemRev[name] ?? 0) + item.total;
+      }
+    }
+    final topItems = itemQty.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
 
     final dateRangeStr =
         reportState.filter == ReportDateFilter.custom &&
-            reportState.startDate != null
+            reportState.startDate != null &&
+            reportState.endDate != null
         ? '${DateFormat('dd MMM yyyy').format(reportState.startDate!)} - ${DateFormat('dd MMM yyyy').format(reportState.endDate!)}'
-        : 'Period: ${reportState.filter.toString().split('.').last.toUpperCase()}';
+        : reportState.filter
+              .toString()
+              .split('.')
+              .last
+              .replaceAllMapped(
+                RegExp('[A-Z]'),
+                (m) => ' ${m[0]}',
+              )
+              .trim()
+              .toUpperCase();
 
+    // ── Reusable PDF builders ───────────────────────────────────────
+    pw.Widget kpiCard(String label, String value, PdfColor accent) {
+      return pw.Expanded(
+        child: pw.Container(
+          margin: const pw.EdgeInsets.symmetric(horizontal: 4),
+          padding: const pw.EdgeInsets.fromLTRB(12, 11, 12, 12),
+          decoration: pw.BoxDecoration(
+            color: PdfColors.white,
+            borderRadius: pw.BorderRadius.circular(8),
+            border: pw.Border.all(color: line, width: 0.8),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Row(
+                children: [
+                  pw.Container(
+                    width: 7,
+                    height: 7,
+                    decoration: pw.BoxDecoration(
+                      color: accent,
+                      borderRadius: pw.BorderRadius.circular(2),
+                    ),
+                  ),
+                  pw.SizedBox(width: 6),
+                  pw.Expanded(
+                    child: pw.Text(
+                      label.toUpperCase(),
+                      maxLines: 1,
+                      overflow: pw.TextOverflow.clip,
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        color: muted,
+                        fontWeight: pw.FontWeight.bold,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 8),
+              pw.Text(
+                value,
+                style: pw.TextStyle(
+                  fontSize: 14,
+                  color: dark,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    pw.Widget sectionTitle(String t) => pw.Container(
+      margin: const pw.EdgeInsets.only(bottom: 10),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Row(
+            children: [
+              pw.Container(width: 3, height: 13, color: orange),
+              pw.SizedBox(width: 8),
+              pw.Text(
+                t.toUpperCase(),
+                style: pw.TextStyle(
+                  fontSize: 11,
+                  fontWeight: pw.FontWeight.bold,
+                  color: slate,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 7),
+          pw.Container(height: 0.8, color: line),
+        ],
+      ),
+    );
+
+    pw.Widget styledTable({
+      required List<String> headers,
+      required List<List<String>> data,
+      Map<int, pw.Alignment>? alignments,
+    }) {
+      return pw.TableHelper.fromTextArray(
+        headers: headers,
+        data: data.isEmpty ? [List.filled(headers.length, '-')] : data,
+        headerStyle: pw.TextStyle(
+          fontWeight: pw.FontWeight.bold,
+          color: PdfColors.white,
+          fontSize: 8.5,
+          letterSpacing: 0.3,
+        ),
+        headerDecoration: const pw.BoxDecoration(color: slate),
+        headerHeight: 26,
+        cellHeight: 22,
+        cellStyle: const pw.TextStyle(fontSize: 9, color: dark),
+        oddRowDecoration: const pw.BoxDecoration(color: stripe),
+        cellAlignments: alignments,
+        cellPadding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        border: pw.TableBorder(
+          horizontalInside: pw.BorderSide(color: line, width: 0.5),
+          bottom: pw.BorderSide(color: line, width: 0.5),
+        ),
+        headerAlignment: pw.Alignment.centerLeft,
+      );
+    }
+
+    // Embed a real Unicode font. The pdf package's built-in Helvetica is a
+    // non-embedded Type1 font that some Android print-preview rasterizers show
+    // as a BLANK page — embedding NotoSans makes the report render everywhere
+    // (and avoids missing-glyph crashes for ₹/extended characters).
+    pw.ThemeData? theme;
+    try {
+      theme = pw.ThemeData.withFont(
+        base: await PdfGoogleFonts.notoSansRegular(),
+        bold: await PdfGoogleFonts.notoSansBold(),
+      );
+    } catch (_) {
+      theme = null; // offline / font fetch failed → fall back to default
+    }
+
+    final pdf = pw.Document();
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(32),
-        build: (pw.Context context) => [
-          pw.Header(
-            level: 0,
-            child: pw.Row(
+        theme: theme,
+        margin: const pw.EdgeInsets.fromLTRB(28, 28, 28, 36),
+        footer: (ctx) => pw.Column(
+          children: [
+            pw.Container(height: 0.5, color: line),
+            pw.SizedBox(height: 6),
+            pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                pw.Text(
+                  companyName,
+                  style: pw.TextStyle(
+                    fontSize: 8,
+                    color: muted,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+                pw.Text(
+                  'Page ${ctx.pageNumber} of ${ctx.pagesCount}',
+                  style: const pw.TextStyle(fontSize: 8, color: muted),
+                ),
+              ],
+            ),
+          ],
+        ),
+        build: (pw.Context context) => [
+          // ── Branded header band ──────────────────────────────
+          pw.Container(
+            padding: const pw.EdgeInsets.all(20),
+            decoration: pw.BoxDecoration(
+              color: slate,
+              borderRadius: pw.BorderRadius.circular(12),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
                   children: [
-                    pw.Text(
-                      'RasaBhojan Sales Report',
-                      style: pw.TextStyle(
-                        fontSize: 24,
-                        fontWeight: pw.FontWeight.bold,
+                    // Brand monogram
+                    pw.Container(
+                      width: 36,
+                      height: 36,
+                      alignment: pw.Alignment.center,
+                      decoration: pw.BoxDecoration(
+                        color: orange,
+                        borderRadius: pw.BorderRadius.circular(9),
+                      ),
+                      child: pw.Text(
+                        companyName.isNotEmpty
+                            ? companyName[0].toUpperCase()
+                            : 'R',
+                        style: pw.TextStyle(
+                          fontSize: 18,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.white,
+                        ),
                       ),
                     ),
-                    pw.SizedBox(height: 4),
-                    pw.Text(
-                      dateRangeStr,
-                      style: const pw.TextStyle(fontSize: 12),
+                    pw.SizedBox(width: 12),
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text(
+                          companyName,
+                          style: pw.TextStyle(
+                            fontSize: 20,
+                            fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.white,
+                          ),
+                        ),
+                        pw.SizedBox(height: 3),
+                        pw.Row(
+                          children: [
+                            pw.Text(
+                              'SALES REPORT',
+                              style: pw.TextStyle(
+                                fontSize: 8,
+                                color: orange,
+                                fontWeight: pw.FontWeight.bold,
+                                letterSpacing: 1,
+                              ),
+                            ),
+                            pw.Text(
+                              '   ·   $dateRangeStr',
+                              style: const pw.TextStyle(
+                                fontSize: 8,
+                                color: PdfColor.fromInt(0xFFCBD5E1),
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -1386,99 +1819,154 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text(
-                      'Generated on:',
-                      style: const pw.TextStyle(fontSize: 10),
+                      'GENERATED',
+                      style: const pw.TextStyle(
+                        fontSize: 7,
+                        color: PdfColor.fromInt(0xFF94A3B8),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    pw.SizedBox(height: 3),
+                    pw.Text(
+                      DateFormat('dd MMM yyyy').format(DateTime.now()),
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.white,
+                      ),
                     ),
                     pw.Text(
-                      DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now()),
-                      style: const pw.TextStyle(fontSize: 10),
+                      DateFormat('hh:mm a').format(DateTime.now()),
+                      style: const pw.TextStyle(
+                        fontSize: 8,
+                        color: PdfColor.fromInt(0xFFCBD5E1),
+                      ),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-          pw.SizedBox(height: 20),
+          pw.SizedBox(height: 22),
 
-          pw.Text(
-            'Financial Summary',
-            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
-          ),
-          pw.SizedBox(height: 10),
-          pw.TableHelper.fromTextArray(
-            headers: ['Metric', 'Value'],
-            data: [
-              ['Total Revenue', 'INR ${totalRevenue.toStringAsFixed(2)}'],
-              ['Total Orders', '$totalOrders'],
-              ['Average Ticket Size', 'INR ${aov.toStringAsFixed(2)}'],
-              ['Cash Payments', 'INR ${cashTotal.toStringAsFixed(2)}'],
-              ['UPI Payments', 'INR ${upiTotal.toStringAsFixed(2)}'],
-              ['Card Payments', 'INR ${cardTotal.toStringAsFixed(2)}'],
-              ['Tax Collected', 'INR ${totalTax.toStringAsFixed(2)}'],
-              ['Discounts Given', 'INR ${totalDiscount.toStringAsFixed(2)}'],
+          // ── KPI cards ────────────────────────────────────────
+          pw.Row(
+            children: [
+              kpiCard('Total Revenue', moneyShort(totalRevenue), green),
+              kpiCard('Total Orders', '$totalOrders', blue),
+              kpiCard('Avg Ticket', moneyShort(aov), orange),
             ],
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-            cellAlignment: pw.Alignment.centerLeft,
+          ),
+          pw.SizedBox(height: 8),
+          pw.Row(
+            children: [
+              kpiCard('Tax Collected', moneyShort(totalTax), amber),
+              kpiCard('Discounts', moneyShort(totalDiscount), red),
+              kpiCard(
+                'Net Subtotal',
+                moneyShort(reportState.totalGrossAmount),
+                blue,
+              ),
+            ],
           ),
           pw.SizedBox(height: 24),
 
-          pw.Text(
-            'Category Sales Breakdown',
-            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
-          ),
-          pw.SizedBox(height: 10),
-          pw.TableHelper.fromTextArray(
-            headers: ['Category / Section', 'Revenue (INR)', 'Share (%)'],
-            data: categorySales.isEmpty
-                ? [
-                    ['No data available', '0.00', '0%'],
-                  ]
-                : categorySales.entries.map((e) {
-                    final pct = totalRevenue > 0
-                        ? (e.value / totalRevenue) * 100
-                        : 0.0;
-                    return [
-                      e.key,
-                      e.value.toStringAsFixed(2),
-                      '${pct.toStringAsFixed(1)}%',
-                    ];
-                  }).toList(),
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          // ── Payment breakdown ────────────────────────────────
+          sectionTitle('Payment Mode Breakdown'),
+          styledTable(
+            headers: ['Payment Mode', 'Amount', 'Share'],
+            data: [
+              ['Cash', money(cashTotal), pct(cashTotal)],
+              ['UPI', money(upiTotal), pct(upiTotal)],
+              ['Card', money(cardTotal), pct(cardTotal)],
+              ['Total', money(totalRevenue), '100%'],
+            ],
+            alignments: {
+              1: pw.Alignment.centerRight,
+              2: pw.Alignment.centerRight,
+            },
           ),
           pw.SizedBox(height: 24),
 
-          pw.Text(
-            'Top Selling Items',
-            style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+          // ── Category sales ───────────────────────────────────
+          sectionTitle('Category Sales Breakdown'),
+          styledTable(
+            headers: ['Category / Section', 'Revenue', 'Share'],
+            data: sortedCategories
+                .map((e) => [e.key, money(e.value), pct(e.value)])
+                .toList(),
+            alignments: {
+              1: pw.Alignment.centerRight,
+              2: pw.Alignment.centerRight,
+            },
           ),
-          pw.SizedBox(height: 10),
-          pw.TableHelper.fromTextArray(
-            headers: ['Item Name', 'Quantity Sold'],
-            data: topItems.isEmpty
-                ? [
-                    ['No items sold', '0 pcs'],
-                  ]
-                : topItems
-                      .take(10)
-                      .map((e) => [e.key, '${e.value} pcs'])
-                      .toList(),
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+          pw.SizedBox(height: 24),
+
+          // ── Top selling items ────────────────────────────────
+          sectionTitle('Top Selling Items'),
+          styledTable(
+            headers: ['#', 'Item Name', 'Qty Sold', 'Revenue'],
+            data: [
+              for (var i = 0; i < topItems.take(10).length; i++)
+                [
+                  '${i + 1}',
+                  topItems[i].key,
+                  '${topItems[i].value}',
+                  money(itemRev[topItems[i].key] ?? 0),
+                ],
+            ],
+            alignments: {
+              0: pw.Alignment.center,
+              2: pw.Alignment.centerRight,
+              3: pw.Alignment.centerRight,
+            },
+          ),
+          pw.SizedBox(height: 24),
+
+          // ── Bill ledger ──────────────────────────────────────
+          sectionTitle('Bill Ledger (${reportState.bills.length})'),
+          styledTable(
+            headers: ['Bill #', 'Date', 'Mode', 'Amount', 'Status'],
+            data: reportState.bills.map((b) {
+              return [
+                b.billNumber ?? '-',
+                b.createdAt != null
+                    ? DateFormat('dd/MM hh:mm a').format(b.createdAt!.toLocal())
+                    : '-',
+                b.paymentMode.toUpperCase(),
+                money(b.totalAmount),
+                b.isCancelled ? 'CANCELLED' : 'PAID',
+              ];
+            }).toList(),
+            alignments: {
+              3: pw.Alignment.centerRight,
+              4: pw.Alignment.center,
+            },
           ),
         ],
       ),
     );
 
-    final messenger = ScaffoldMessenger.of(context);
     try {
-      await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save(),
-        name:
-            'Sales_Report_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
-      );
+      // Build the bytes up-front so any layout error is caught here.
+      final bytes = await pdf.save();
+      final filename =
+          'Sales_Report_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.pdf';
+
+      // Share/save the file directly instead of the in-app print PREVIEW —
+      // the preview's rasterizer renders blank on some Android devices, but
+      // the actual PDF bytes are valid. sharePdf hands them to the OS (save to
+      // Files / open in a real PDF viewer / Drive), which is the reliable
+      // "download" path.
+      await Printing.sharePdf(bytes: bytes, filename: filename);
     } catch (e) {
-      messenger.showSnackBar(
-        SnackBar(content: Text('Failed to generate report PDF: $e')),
-      );
+      if (context.mounted) {
+        AppFeedback.toast(
+          context,
+          'Failed to generate report PDF: $e',
+          isError: true,
+        );
+      }
     }
   }
 }
@@ -1531,12 +2019,44 @@ class _BillCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Bill #${bill.billNumber ?? '-'}',
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            'Bill #${bill.billNumber ?? '-'}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              decoration: bill.isCancelled
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                            ),
+                          ),
+                        ),
+                        if (bill.isCancelled) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.error.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              'CANCELLED',
+                              style: GoogleFonts.inter(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w800,
+                                color: AppColors.error,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 4),
                     Text(
@@ -1621,6 +2141,355 @@ class _BillCard extends StatelessWidget {
       default:
         return Icons.payments_rounded;
     }
+  }
+}
+
+/// Editable bill sheet — adjust line quantities, remove items, then save.
+/// Recomputes subtotal/tax/total live and persists via [SupabaseService.updateBill].
+class _BillEditSheet extends ConsumerStatefulWidget {
+  final Bill bill;
+  final String companyId;
+  final bool isDark;
+
+  const _BillEditSheet({
+    required this.bill,
+    required this.companyId,
+    required this.isDark,
+  });
+
+  @override
+  ConsumerState<_BillEditSheet> createState() => _BillEditSheetState();
+}
+
+class _BillEditSheetState extends ConsumerState<_BillEditSheet> {
+  // Working copy of quantities keyed by bill_item id, plus removed ids.
+  late final Map<String, double> _qty;
+  final Set<String> _removed = {};
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _qty = {for (final it in widget.bill.items) it.id: it.qty};
+  }
+
+  List<BillItem> get _remaining =>
+      widget.bill.items.where((it) => !_removed.contains(it.id)).toList();
+
+  double get _subtotal => _remaining.fold(
+    0.0,
+    (sum, it) => sum + (_qty[it.id] ?? it.qty) * it.rate,
+  );
+
+  double get _tax => _remaining.fold(
+    0.0,
+    (sum, it) =>
+        sum + (_qty[it.id] ?? it.qty) * it.rate * (it.taxPercentage / 100),
+  );
+
+  double get _total {
+    final t = _subtotal + _tax - widget.bill.discountAmount;
+    return t < 0 ? 0 : t;
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      final items = _remaining
+          .map(
+            (it) => {
+              'id': it.id,
+              'qty': _qty[it.id] ?? it.qty,
+              'rate': it.rate,
+              'gst_rate': it.taxPercentage,
+            },
+          )
+          .toList();
+
+      await SupabaseService.updateBill(
+        billId: widget.bill.id,
+        items: items,
+        removedItemIds: _removed.toList(),
+        discountAmount: widget.bill.discountAmount,
+      );
+      await ref.read(reportProvider(widget.companyId).notifier).fetchReport();
+
+      if (mounted) {
+        Navigator.pop(context);
+        AppFeedback.success(
+          context,
+          'Bill #${widget.bill.billNumber ?? '-'} updated',
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        AppFeedback.toast(context, 'Failed to update bill: $e', isError: true);
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = widget.isDark;
+    final accent = isDark ? AppColors.primaryAmber : AppColors.primaryOrange;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkSurface : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+        20,
+        16,
+        20,
+        16 + MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Center(
+            child: Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: (isDark ? Colors.white : Colors.black).withValues(
+                  alpha: 0.1,
+                ),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Icon(Icons.edit_rounded, color: accent, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Edit Bill #${widget.bill.billNumber ?? '-'}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close_rounded),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // Item list
+          Flexible(
+            child: _remaining.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 32),
+                    child: Center(
+                      child: Text(
+                        'All items removed — cancel the bill instead.',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: AppColors.error,
+                        ),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: _remaining.length,
+                    separatorBuilder: (_, __) => Divider(
+                      height: 16,
+                      color: isDark
+                          ? AppColors.darkBorder.withValues(alpha: 0.3)
+                          : AppColors.lightBorder.withValues(alpha: 0.5),
+                    ),
+                    itemBuilder: (context, index) {
+                      final it = _remaining[index];
+                      final qty = _qty[it.id] ?? it.qty;
+                      return Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  it.itemName ?? 'Item',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                Text(
+                                  '₹${it.rate.toStringAsFixed(0)} each',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    color: isDark
+                                        ? AppColors.textWhiteMuted
+                                        : AppColors.textDarkMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Qty stepper
+                          _qtyBtn(
+                            Icons.remove_rounded,
+                            isDark,
+                            () {
+                              final next = qty - 1;
+                              setState(() {
+                                if (next <= 0) {
+                                  _removed.add(it.id);
+                                } else {
+                                  _qty[it.id] = next;
+                                }
+                              });
+                            },
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            child: Text(
+                              qty.toStringAsFixed(0),
+                              style: GoogleFonts.inter(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          _qtyBtn(
+                            Icons.add_rounded,
+                            isDark,
+                            () => setState(() => _qty[it.id] = qty + 1),
+                          ),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.delete_outline_rounded,
+                              color: AppColors.error,
+                              size: 20,
+                            ),
+                            onPressed: () =>
+                                setState(() => _removed.add(it.id)),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+          ),
+          const Divider(height: 24),
+          _editRow('Subtotal', _subtotal, isDark),
+          if (_tax > 0) _editRow('Tax', _tax, isDark),
+          if (widget.bill.discountAmount > 0)
+            _editRow('Discount', -widget.bill.discountAmount, isDark),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'New Total',
+                style: GoogleFonts.inter(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              Text(
+                '₹${_total.toStringAsFixed(0)}',
+                style: GoogleFonts.inter(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  color: accent,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: ElevatedButton(
+              onPressed: (_saving || _remaining.isEmpty) ? null : _save,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: accent,
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              child: _saving
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 2.5,
+                      ),
+                    )
+                  : Text(
+                      'SAVE CHANGES',
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _qtyBtn(IconData icon, bool isDark, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : Colors.black.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(icon, size: 18),
+      ),
+    );
+  }
+
+  Widget _editRow(String label, double amount, bool isDark) {
+    final neg = amount < 0;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: isDark
+                  ? AppColors.textWhiteMuted
+                  : AppColors.textDarkMuted,
+            ),
+          ),
+          Text(
+            '${neg ? '-' : ''}₹${amount.abs().toStringAsFixed(0)}',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: neg ? AppColors.error : null,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/utils/api_helper.dart';
 import '../../../core/utils/india_data.dart';
 import '../../../providers/providers.dart';
 import '../../../models/models.dart';
@@ -202,33 +203,13 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
   // ─── Feedback ──────────────────────────────────────────────────────────────
 
   void _showSuccess(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg, style: GoogleFonts.inter(fontSize: 13)),
-        backgroundColor: AppColors.success,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    if (!mounted) return;
+    AppFeedback.success(context, msg);
   }
 
   void _showError(String msg, {VoidCallback? onRetry}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg, style: GoogleFonts.inter(fontSize: 13)),
-        backgroundColor: AppColors.error,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        duration: const Duration(seconds: 6),
-        action: onRetry != null
-            ? SnackBarAction(
-                label: 'RETRY',
-                textColor: Colors.white,
-                onPressed: onRetry,
-              )
-            : null,
-      ),
-    );
+    if (!mounted) return;
+    AppFeedback.toast(context, msg, isError: true, onRetry: onRetry);
   }
 
   // ─── Build ─────────────────────────────────────────────────────────────────
