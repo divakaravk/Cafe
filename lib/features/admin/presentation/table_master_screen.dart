@@ -6,8 +6,11 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
+import '../../../core/utils/network_check.dart' as net;
+import '../../../core/widgets/app_data_table.dart';
+import '../../../core/widgets/window_class.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 
@@ -47,16 +50,7 @@ class _TableMasterScreenState extends ConsumerState<TableMasterScreen> {
 
   // ─── Network ───────────────────────────────────────────────────────────────
 
-  Future<bool> _hasNetwork() async {
-    try {
-      final result = await InternetAddress.lookup(
-        'google.com',
-      ).timeout(const Duration(seconds: 5));
-      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
+  Future<bool> _hasNetwork() => net.hasNetwork();
 
   Future<bool> _checkNetworkAndWarn() async {
     if (!await _hasNetwork()) {
@@ -78,7 +72,7 @@ class _TableMasterScreenState extends ConsumerState<TableMasterScreen> {
       if (!await _hasNetwork()) throw const SocketException('offline');
       final user = ref.read(authStateProvider).value;
       if (user == null) return;
-      final data = await SupabaseService.getTables(
+      final data = await Backend.getTables(
         user.companyId,
       ).timeout(const Duration(seconds: 15));
       if (!mounted) return;
@@ -128,7 +122,7 @@ class _TableMasterScreenState extends ConsumerState<TableMasterScreen> {
       // Re-verify occupancy server-side before editing — the table may have
       // been seated since the list was loaded.
       if (existing != null) {
-        final occupied = await SupabaseService.isTableOccupied(
+        final occupied = await Backend.isTableOccupied(
           existing.id,
         ).timeout(const Duration(seconds: 10));
         if (occupied) {
@@ -137,7 +131,7 @@ class _TableMasterScreenState extends ConsumerState<TableMasterScreen> {
           await _loadTables(); // reflect the new occupancy in the list
           return false;
         }
-        await SupabaseService.updateTable(
+        await Backend.updateTable(
           id: existing.id,
           tableNumber: tableNumber,
           section: section,
@@ -145,7 +139,7 @@ class _TableMasterScreenState extends ConsumerState<TableMasterScreen> {
           isActive: isActive,
         ).timeout(const Duration(seconds: 15));
       } else {
-        await SupabaseService.createTable(
+        await Backend.createTable(
           companyId: user.companyId,
           tableNumber: tableNumber,
           section: section,
@@ -247,6 +241,10 @@ class _TableMasterScreenState extends ConsumerState<TableMasterScreen> {
       return _buildEmptyState(isDark);
     }
 
+    if (context.isWideWindow) {
+      return _buildWideBody(isDark);
+    }
+
     // Group by section, preserving the numeric-aware sort.
     final sections = <String, List<CafeTable>>{};
     for (final t in _tables) {
@@ -273,6 +271,77 @@ class _TableMasterScreenState extends ConsumerState<TableMasterScreen> {
             const SizedBox(height: 8),
           ],
         ],
+      ),
+    );
+  }
+
+  /// Desktop/web layout: the same data, as a searchable/sortable/paginated
+  /// table instead of a phone-style scrolling card list.
+  Widget _buildWideBody(bool isDark) {
+    return RefreshIndicator(
+      onRefresh: _loadTables,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildStatsHeader(isDark),
+            const SizedBox(height: 20),
+            AppDataTable<CafeTable>(
+              title: 'All Tables',
+              rows: _tables,
+              searchText: (t) => '${t.tableNumber} ${t.section ?? ''}',
+              toolbar: [
+                FilledButton.icon(
+                  onPressed: () => _showEditor(),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: Text('Add Table', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                  style: FilledButton.styleFrom(backgroundColor: AppColors.primaryOrange),
+                ),
+              ],
+              onRowTap: _onEditTap,
+              actions: [AppRowAction<CafeTable>('Edit', Icons.edit_rounded, _onEditTap)],
+              columns: [
+                AppColumn<CafeTable>(
+                  label: 'Table',
+                  value: (t) => t.tableNumber,
+                  cell: (t) => Text(
+                    'Table ${t.tableNumber}',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                AppColumn<CafeTable>(
+                  label: 'Section',
+                  value: (t) => t.section ?? 'Main',
+                  minWindow: WindowClass.medium,
+                ),
+                AppColumn<CafeTable>(
+                  label: 'Capacity',
+                  value: (t) => t.seatingCapacity,
+                  numeric: true,
+                  size: ColumnSize.S,
+                  cell: (t) => Text('${t.seatingCapacity} seats'),
+                ),
+                AppColumn<CafeTable>(
+                  label: 'Status',
+                  value: (t) => t.isOccupied
+                      ? 'OCCUPIED'
+                      : (!t.isActive ? 'INACTIVE' : 'AVAILABLE'),
+                  size: ColumnSize.S,
+                  cell: (t) {
+                    final (Color color, String label, IconData icon) = t.isOccupied
+                        ? (AppColors.error, 'OCCUPIED', Icons.lock_rounded)
+                        : !t.isActive
+                        ? (AppColors.textDarkMuted, 'INACTIVE', Icons.block_rounded)
+                        : (AppColors.success, 'AVAILABLE', Icons.check_circle_rounded);
+                    return _statusPill(color, label, icon);
+                  },
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

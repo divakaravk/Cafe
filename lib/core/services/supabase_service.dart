@@ -170,6 +170,37 @@ class SupabaseService {
     return client.storage.from('profiles').getPublicUrl(path);
   }
 
+  /// Deactivates and force-logs-out a user (admin action from User Master).
+  /// Added for the [Backend] facade — was previously a direct
+  /// `SupabaseService.client` call inline in user_master_screen.dart.
+  static Future<void> forceLogoutUser(String userId) async {
+    await client
+        .from('user_profiles')
+        .update({'user_active': false, 'is_login': false})
+        .eq('id', userId);
+  }
+
+  /// Updates the signed-in user's own editable profile fields.
+  /// Added for the [Backend] facade — was previously a direct
+  /// `SupabaseService.client` call inline in my_profile_screen.dart.
+  static Future<void> updateOwnProfile({
+    required String userId,
+    required String userName,
+    String? phone,
+    String? email,
+    String? avatarUrl,
+  }) async {
+    await client
+        .from('user_profiles')
+        .update({
+          'user_name': userName,
+          'mob_number': phone,
+          'user_email': email,
+          'avatar_url': avatarUrl,
+        })
+        .eq('id', userId);
+  }
+
   // ─── COMPANY ───────────────────────────────────────────
   static Future<Map<String, dynamic>?> getCompany(String companyId) async {
     final res = await client
@@ -303,6 +334,28 @@ class SupabaseService {
 
   static Future<void> deleteItemMaster(String id) async {
     await client.from('item_master').delete().eq('id', id);
+  }
+
+  /// Upserts an item group row. Added for the [Backend] facade — was
+  /// previously a direct `SupabaseService.client` call inline in
+  /// item_master_screen.dart.
+  static Future<void> saveItemGroup(Map<String, dynamic> itemData) async {
+    await client.from('item_master').upsert(itemData);
+  }
+
+  /// Points a group's `default_variant_id` at [variantId]. Only used right
+  /// after creating a brand-new group's auto-generated "Default" variant —
+  /// [setDefaultVariant] is the general-purpose version used everywhere else.
+  /// Added for the [Backend] facade — was previously a direct
+  /// `SupabaseService.client` call inline in item_master_screen.dart.
+  static Future<void> setGroupDefaultVariantPointer({
+    required String itemId,
+    required String variantId,
+  }) async {
+    await client
+        .from('item_master')
+        .update({'default_variant_id': variantId})
+        .eq('id', itemId);
   }
 
   /// Returns the selling items (variants) for a single group, sorted by

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter_riverpod/legacy.dart';
 import '../models/models.dart';
-import '../core/services/supabase_service.dart';
+import '../core/backend/backend.dart';
 
 enum ReportDateFilter {
   today,
@@ -347,7 +347,7 @@ class ReportNotifier extends StateNotifier<ReportState> {
           break;
       }
 
-      final res = await SupabaseService.getBills(
+      final res = await Backend.getBills(
         companyId,
         startDate: start,
         endDate: end,
@@ -356,7 +356,7 @@ class ReportNotifier extends StateNotifier<ReportState> {
 
       List<Bill> comparisonBills = [];
       if (compStart != null && compEnd != null) {
-        final compRes = await SupabaseService.getBills(
+        final compRes = await Backend.getBills(
           companyId,
           startDate: compStart,
           endDate: compEnd,

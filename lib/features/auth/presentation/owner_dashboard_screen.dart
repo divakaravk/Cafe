@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/services/push_service.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
@@ -157,7 +157,7 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final rows = await SupabaseService.listCompanyRegistrations();
+      final rows = await Backend.listCompanyRegistrations();
       if (mounted) setState(() => _items = rows);
     } catch (e) {
       if (mounted) AppFeedback.error(context, e);
@@ -169,7 +169,7 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
   Future<void> _approve(Map<String, dynamic> reg) async {
     setState(() => _approvingId = reg['id'] as String);
     try {
-      final res = await SupabaseService.approveCompanyRegistration(
+      final res = await Backend.approveCompanyRegistration(
         reg['id'] as String,
       );
       if (!mounted) return;
@@ -228,7 +228,7 @@ class _OwnerDashboardScreenState extends ConsumerState<OwnerDashboardScreen> {
               }
               setSheet(() => saving = true);
               try {
-                final ok = await SupabaseService.changePassword(
+                final ok = await Backend.changePassword(
                   userId: widget.owner.id,
                   currentPassword: current.text,
                   newPassword: next.text,

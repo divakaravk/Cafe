@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
-import '../core/services/supabase_service.dart';
+import '../core/backend/backend.dart';
 import '../core/constants/app_constants.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
@@ -31,7 +31,7 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
       perms = UserPermission.all(profile.id);
     } else {
       try {
-        final json = await SupabaseService.getUserPermissions(profile.id);
+        final json = await Backend.getUserPermissions(profile.id);
         perms = json != null
             ? UserPermission.fromJson(json)
             : UserPermission.forRole(profile.id, profile.role);
@@ -59,7 +59,7 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
   Future<void> signIn(String input, String password, {bool force = false}) async {
     state = const AsyncValue.loading();
     try {
-      final profileJson = await SupabaseService.signInWithUserMaster(
+      final profileJson = await Backend.signInWithUserMaster(
         input: input,
         password: password,
         forceLogin: force,
@@ -93,7 +93,7 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
     final currentUser = state.value;
     if (clearRemote && currentUser != null) {
       try {
-        await SupabaseService.setLoginStatus(currentUser.id, false);
+        await Backend.setLoginStatus(currentUser.id, false);
       } catch (_) {}
     }
     final prefs = await SharedPreferences.getInstance();
@@ -101,7 +101,7 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
     await prefs.remove(_lastLoginKey);
     await ref.read(permissionsProvider.notifier).clear();
     try {
-      await SupabaseService.signOut();
+      await Backend.signOut();
     } catch (_) {}
     state = const AsyncValue.data(null);
   }
@@ -116,7 +116,7 @@ class AuthNotifier extends Notifier<AsyncValue<UserProfile?>> {
 
     Map<String, dynamic>? status;
     try {
-      status = await SupabaseService.getUserSessionStatus(user.id);
+      status = await Backend.getUserSessionStatus(user.id);
     } catch (_) {
       return; // offline / transient — don't kick the user out
     }
@@ -227,7 +227,7 @@ final companyProvider = FutureProvider.family<Company?, String>((
   ref,
   companyId,
 ) async {
-  final json = await SupabaseService.getCompany(companyId);
+  final json = await Backend.getCompany(companyId);
   return json != null ? Company.fromJson(json) : null;
 });
 
@@ -236,7 +236,7 @@ final itemGroupsProvider = FutureProvider.family<List<Item>, String>((
   ref,
   companyId,
 ) async {
-  final res = await SupabaseService.getItemGroups(companyId);
+  final res = await Backend.getItemGroups(companyId);
   return res.map((e) => Item.fromJson(e)).toList();
 });
 
@@ -245,7 +245,7 @@ final allItemsProvider = FutureProvider.family<List<Item>, String>((
   ref,
   companyId,
 ) async {
-  final res = await SupabaseService.getAllItems(companyId);
+  final res = await Backend.getAllItems(companyId);
   return res.map((e) => Item.fromJson(e)).toList();
 });
 
@@ -271,7 +271,7 @@ class SelectedPosGroupNotifier extends Notifier<String?> {
 // undesirable.
 final variantsByGroupProvider =
     FutureProvider.family<List<ItemVariant>, String>((ref, itemId) async {
-  final res = await SupabaseService.getVariantsByGroup(
+  final res = await Backend.getVariantsByGroup(
     itemId,
     onlySellable: true,
   );
@@ -283,7 +283,7 @@ final tablesProvider = FutureProvider.family<List<CafeTable>, String>((
   ref,
   companyId,
 ) async {
-  final res = await SupabaseService.getTables(companyId);
+  final res = await Backend.getTables(companyId);
   return res.map((e) => CafeTable.fromJson(e)).toList();
 });
 
@@ -293,7 +293,7 @@ final companyUsersProvider = FutureProvider.family<List<UserProfile>, String>((
   ref,
   companyId,
 ) async {
-  final res = await SupabaseService.getUsersForCompany(companyId);
+  final res = await Backend.getUsersForCompany(companyId);
   return res.map((e) => UserProfile.fromJson(e)).toList();
 });
 
@@ -447,7 +447,7 @@ final activeKotsProvider = FutureProvider.family<List<KotMaster>, String>((
   ref,
   companyId,
 ) async {
-  final res = await SupabaseService.getActiveKots(companyId);
+  final res = await Backend.getActiveKots(companyId);
   return res.map((e) => KotMaster.fromJson(e)).toList();
 });
 
@@ -456,6 +456,6 @@ final billsProvider = FutureProvider.family<List<Bill>, String>((
   ref,
   companyId,
 ) async {
-  final res = await SupabaseService.getBills(companyId);
+  final res = await Backend.getBills(companyId);
   return res.map((e) => Bill.fromJson(e)).toList();
 });

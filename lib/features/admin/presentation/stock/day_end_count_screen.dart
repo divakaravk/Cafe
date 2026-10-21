@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/services/supabase_service.dart';
+import '../../../../core/backend/backend.dart';
 import '../../../../core/utils/api_helper.dart';
 import '../../../../core/widgets/network_error_view.dart';
 import '../../../../models/inventory_models.dart';
@@ -96,7 +96,7 @@ class _DayEndCountScreenState extends ConsumerState<DayEndCountScreen> {
         '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
     try {
       for (final v in pending) {
-        await SupabaseService.submitStockAdjustment(
+        await Backend.submitStockAdjustment(
           companyId: user.companyId,
           rawMaterialId: v.rawMaterialId,
           qty: v.variance,

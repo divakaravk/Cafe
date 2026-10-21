@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,8 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
+import '../../../core/widgets/app_data_table.dart';
+import '../../../core/widgets/window_class.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 import '../../admin/presentation/item_variant_screen.dart';
@@ -51,6 +52,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
   bool _isTaxable = true;
   String? _selectedHsnId;
   XFile? _pickedImage;
+  Uint8List? _pickedImageBytes;
   String? _imageUrl;
 
   @override
@@ -78,8 +80,8 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       final user = ref.read(authStateProvider).value;
       if (user != null) {
         final results = await Future.wait([
-          SupabaseService.getItemGroups(user.companyId),
-          SupabaseService.getCompanyHsns(user.companyId),
+          Backend.getItemGroups(user.companyId),
+          Backend.getCompanyHsns(user.companyId),
         ]);
         setState(() {
           _items = (results[0])
@@ -132,6 +134,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       _selectedHsnId = item.hsnId;
       _imageUrl = item.imageUrl;
       _pickedImage = null;
+      _pickedImageBytes = null;
     });
   }
 
@@ -148,6 +151,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
     _selectedHsnId = null;
     _imageUrl = null;
     _pickedImage = null;
+    _pickedImageBytes = null;
   }
 
   // ─── VALIDATION ─────────────────────────────────────────
@@ -189,7 +193,13 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       source: ImageSource.gallery,
       imageQuality: 50,
     );
-    if (image != null) setState(() => _pickedImage = image);
+    if (image == null) return;
+    final bytes = await image.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _pickedImage = image;
+      _pickedImageBytes = bytes;
+    });
   }
 
   Future<void> _save() async {
@@ -205,7 +215,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
       if (_pickedImage != null) {
         final bytes = await _pickedImage!.readAsBytes();
         final ext = _pickedImage!.name.split('.').last;
-        currentImageUrl = await SupabaseService.uploadItemImage(id, bytes, ext);
+        currentImageUrl = await Backend.uploadItemImage(id, bytes, ext);
       }
 
       final baseRate = double.tryParse(_rateController.text.trim()) ?? 0;
@@ -232,14 +242,14 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
         'updated_by': user.id,
       };
 
-      await SupabaseService.client.from('item_master').upsert(itemData);
+      await Backend.saveItemGroup(itemData);
 
       // Every group needs at least one sellable item. For a brand-new group
       // create an inheriting "Default" selling item so it is immediately
       // usable in the POS (base_rate 0 ⇒ inherits the group rate).
       if (_selectedItem == null) {
         final variantId = const Uuid().v4();
-        await SupabaseService.upsertVariant({
+        await Backend.upsertVariant({
           'id': variantId,
           'item_id': id,
           'variant_name': 'Default',
@@ -249,9 +259,10 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
           'is_default': true,
           'display_order': 0,
         });
-        await SupabaseService.client
-            .from('item_master')
-            .update({'default_variant_id': variantId}).eq('id', id);
+        await Backend.setGroupDefaultVariantPointer(
+          itemId: id,
+          variantId: variantId,
+        );
       }
 
       _showSnackBar('Item Group saved', AppColors.success);
@@ -294,7 +305,7 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
     );
     if (confirm != true) return;
     try {
-      await SupabaseService.deleteItemMaster(item.id);
+      await Backend.deleteItemMaster(item.id);
       final user = ref.read(authStateProvider).value;
       if (user != null) {
         ref.invalidate(itemGroupsProvider(user.companyId));
@@ -425,6 +436,10 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
           ],
         ),
       );
+    }
+
+    if (context.isWideWindow) {
+      return _buildWideItemList(isDark);
     }
 
     final q = _searchQuery.trim().toLowerCase();
@@ -571,6 +586,91 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
                 ),
         ),
       ],
+    );
+  }
+
+  /// Desktop/web layout: searchable/sortable/paginated table instead of a
+  /// phone-style scrolling card list.
+  Widget _buildWideItemList(bool isDark) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AppDataTable<Item>(
+            title: 'Item Groups',
+            rows: _items,
+            searchText: (i) => '${i.itemName} ${i.itemCode} ${i.sectionLabel ?? ''}',
+            toolbar: [
+              FilledButton.icon(
+                onPressed: _startCreateItem,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: Text('Add Group', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                style: FilledButton.styleFrom(backgroundColor: AppColors.primaryOrange),
+              ),
+            ],
+            onRowTap: _startEditItem,
+            actions: [
+              AppRowAction<Item>('Selling Items', Icons.layers_rounded, _openVariants),
+              AppRowAction<Item>('Edit', Icons.edit_outlined, _startEditItem),
+              AppRowAction<Item>('Delete', Icons.delete_outline_rounded, _confirmDelete),
+            ],
+            columns: [
+              AppColumn<Item>(
+                label: 'Group',
+                value: (i) => i.itemName,
+                cell: (i) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildImagePreview(i.imageUrl, 16),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        i.itemName,
+                        style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              AppColumn<Item>(
+                label: 'Code',
+                value: (i) => i.itemCode,
+                minWindow: WindowClass.medium,
+              ),
+              AppColumn<Item>(
+                label: 'Rate',
+                value: (i) => i.baseRate,
+                numeric: true,
+                size: ColumnSize.S,
+                cell: (i) => Text('₹${i.baseRate.toStringAsFixed(0)}'),
+              ),
+              AppColumn<Item>(
+                label: 'Section',
+                value: (i) => i.sectionLabel ?? '',
+                minWindow: WindowClass.expanded,
+                cell: (i) => Text(i.sectionLabel ?? 'No Section'),
+              ),
+              AppColumn<Item>(
+                label: 'Items',
+                value: (i) => i.sellableVariants.length,
+                numeric: true,
+                size: ColumnSize.S,
+                cell: (i) => Text('${i.sellableVariants.length}'),
+              ),
+              AppColumn<Item>(
+                label: 'Status',
+                value: (i) => i.isActive ? 'ACTIVE' : 'INACTIVE',
+                size: ColumnSize.S,
+                cell: (i) => i.isActive
+                    ? const SizedBox.shrink()
+                    : _statusPill('INACTIVE', AppColors.error),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 
@@ -848,9 +948,9 @@ class _ItemMasterScreenState extends ConsumerState<ItemMasterScreen> {
             decoration: BoxDecoration(
               color: AppColors.primaryAmber.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
-              image: _pickedImage != null
+              image: _pickedImageBytes != null
                   ? DecorationImage(
-                      image: FileImage(File(_pickedImage!.path)),
+                      image: MemoryImage(_pickedImageBytes!),
                       fit: BoxFit.cover,
                     )
                   : (_imageUrl != null

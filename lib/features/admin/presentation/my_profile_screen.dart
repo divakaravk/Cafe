@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
+import '../../../core/utils/network_check.dart' as net;
 import '../../../models/models.dart';
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
@@ -43,6 +45,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
   bool _isEditing = false;
   UserPermission? _permissions;
   XFile? _pickedImage;
+  Uint8List? _pickedImageBytes;
 
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
@@ -74,16 +77,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
 
   // ─── Network ──────────────────────────────────────────────────────────────
 
-  Future<bool> _hasNetwork() async {
-    try {
-      final r = await InternetAddress.lookup(
-        'google.com',
-      ).timeout(const Duration(seconds: 5));
-      return r.isNotEmpty && r[0].rawAddress.isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
+  Future<bool> _hasNetwork() => net.hasNetwork();
 
   Future<bool> _checkNetworkAndWarn() async {
     if (!await _hasNetwork()) {
@@ -110,7 +104,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     setState(() => _isLoading = true);
     try {
       if (!await _checkNetworkAndWarn()) return;
-      final data = await SupabaseService.getUserPermissions(
+      final data = await Backend.getUserPermissions(
         _profile.id,
       ).timeout(const Duration(seconds: 10));
       if (data != null && mounted) {
@@ -138,6 +132,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     setState(() {
       _isEditing = false;
       _pickedImage = null;
+      _pickedImageBytes = null;
     });
   }
 
@@ -146,7 +141,13 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
       source: ImageSource.gallery,
       imageQuality: 80,
     );
-    if (picked != null && mounted) setState(() => _pickedImage = picked);
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _pickedImage = picked;
+      _pickedImageBytes = bytes;
+    });
   }
 
   Future<void> _saveProfile() async {
@@ -158,30 +159,26 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     try {
       String? newAvatarUrl = _profile.avatarUrl;
 
-      if (_pickedImage != null) {
-        final bytes = await _pickedImage!.readAsBytes();
-        final ext = _pickedImage!.path.split('.').last.toLowerCase();
-        newAvatarUrl = await SupabaseService.uploadAvatar(
+      if (_pickedImage != null && _pickedImageBytes != null) {
+        final ext = _pickedImage!.name.split('.').last.toLowerCase();
+        newAvatarUrl = await Backend.uploadAvatar(
           _profile.id,
-          bytes,
+          _pickedImageBytes!,
           ext,
         ).timeout(const Duration(seconds: 30));
       }
 
-      await SupabaseService.client
-          .from('user_profiles')
-          .update({
-            'user_name': _nameController.text.trim(),
-            'mob_number': _phoneController.text.trim().isEmpty
-                ? null
-                : _phoneController.text.trim(),
-            'user_email': _emailController.text.trim().isEmpty
-                ? null
-                : _emailController.text.trim(),
-            'avatar_url': newAvatarUrl,
-          })
-          .eq('id', _profile.id)
-          .timeout(const Duration(seconds: 10));
+      await Backend.updateOwnProfile(
+        userId: _profile.id,
+        userName: _nameController.text.trim(),
+        phone: _phoneController.text.trim().isEmpty
+            ? null
+            : _phoneController.text.trim(),
+        email: _emailController.text.trim().isEmpty
+            ? null
+            : _emailController.text.trim(),
+        avatarUrl: newAvatarUrl,
+      ).timeout(const Duration(seconds: 10));
 
       final updated = UserProfile(
         id: _profile.id,
@@ -205,6 +202,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
         setState(() {
           _profile = updated;
           _pickedImage = null;
+          _pickedImageBytes = null;
           _isEditing = false;
         });
         _showSuccess('Profile updated successfully');
@@ -452,8 +450,8 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
                         ),
                         child: ClipOval(
                           child: hasImage
-                              ? Image.file(
-                                  File(_pickedImage!.path),
+                              ? Image.memory(
+                                  _pickedImageBytes!,
                                   fit: BoxFit.cover,
                                 )
                               : hasAvatar

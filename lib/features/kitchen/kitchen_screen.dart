@@ -4,9 +4,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/widgets/window_class.dart';
 import '../../models/models.dart';
 import '../../providers/providers.dart';
-import '../../core/services/supabase_service.dart';
+import '../../core/backend/backend.dart';
 import '../../core/utils/api_helper.dart';
 
 class KitchenScreen extends ConsumerStatefulWidget {
@@ -56,7 +57,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
 
   Future<void> _updateKotStatus(KotMaster kot, String newStatus) async {
     try {
-      await SupabaseService.updateKotStatus(kot.id, newStatus);
+      await Backend.updateKotStatus(kot.id, newStatus);
       ref.invalidate(activeKotsProvider(widget.companyId));
     } catch (e) {
       if (mounted) AppFeedback.toastError(context, e);
@@ -69,7 +70,7 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
     String newStatus,
   ) async {
     try {
-      await SupabaseService.updateKotItemStatus(item.id, newStatus);
+      await Backend.updateKotItemStatus(item.id, newStatus);
       ref.invalidate(activeKotsProvider(widget.companyId));
     } catch (e) {
       if (mounted) AppFeedback.toastError(context, e);
@@ -81,7 +82,6 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final kotsAsync = ref.watch(activeKotsProvider(widget.companyId));
     final size = MediaQuery.of(context).size;
-    final isTablet = size.width > 700;
     final showSearchInHeader = size.width > 720;
 
     return Scaffold(
@@ -124,7 +124,14 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
             ),
             _buildFilterBar(isDark, kotsAsync),
             Expanded(
-              child: kotsAsync.when(
+              // LayoutBuilder, not MediaQuery, decides grid-vs-list: the
+              // kitchen-role full-screen view can sit next to the permanent
+              // web nav panel (300px MediaQuery doesn't know about), so the
+              // actually-available width is what should pick the layout.
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final isTablet = constraints.maxWidth > 700;
+                  return kotsAsync.when(
                 data: (kots) {
                   final filtered = _filterStatus == 'all'
                       ? kots
@@ -202,6 +209,8 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
                     ],
                   ),
                 ),
+                  );
+                },
               ),
             ),
           ],
@@ -233,21 +242,22 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
       ),
       child: Row(
         children: [
-          IconButton(
-            icon: Icon(
-              canPop ? Icons.arrow_back_ios_new_rounded : Icons.menu_rounded,
-              size: isMobile ? 22 : 24,
+          if (canPop || !context.isWideWindow)
+            IconButton(
+              icon: Icon(
+                canPop ? Icons.arrow_back_ios_new_rounded : Icons.menu_rounded,
+                size: isMobile ? 22 : 24,
+              ),
+              onPressed: () {
+                if (canPop) {
+                  Navigator.of(context).pop();
+                } else {
+                  Scaffold.maybeOf(context)?.openDrawer();
+                }
+              },
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
             ),
-            onPressed: () {
-              if (canPop) {
-                Navigator.of(context).pop();
-              } else {
-                Scaffold.maybeOf(context)?.openDrawer();
-              }
-            },
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
           SizedBox(width: isMobile ? 8 : 12),
           Container(
             padding: EdgeInsets.all(isMobile ? 6 : 8),
@@ -604,36 +614,45 @@ class _KitchenScreenState extends ConsumerState<KitchenScreen> {
   }
 
   Widget _buildTabletGrid(List<KotMaster> kots, bool isDark) {
-    final size = MediaQuery.of(context).size;
-    final crossAxisCount = size.width > 1400
-        ? 5
-        : size.width > 1100
-        ? 4
-        : size.width > 800
-        ? 3
-        : 2;
+    // LayoutBuilder, not MediaQuery: this grid may render next to the
+    // permanent web nav panel (home_shell.dart's kitchen-role branch), which
+    // eats 300px MediaQuery doesn't know about — LayoutBuilder measures what
+    // this widget actually gets, correct in that case and in the full-screen
+    // "Kitchen Monitor" push too.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final crossAxisCount = width > 1400
+            ? 5
+            : width > 1100
+            ? 4
+            : width > 800
+            ? 3
+            : 2;
 
-    return GridView.builder(
-      padding: const EdgeInsets.all(10),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: size.width > 1400
-            ? 0.98
-            : size.width > 1100
-            ? 0.94
-            : size.width > 800
-            ? 0.90
-            : 0.85,
-      ),
-      itemCount: kots.length,
-      itemBuilder: (context, i) => _KotCard(
-        kot: kots[i],
-        isDark: isDark,
-        onStatusChange: _updateKotStatus,
-        onItemStatusChange: _updateItemStatus,
-      ).animate().fadeIn(delay: (40 * i).ms).slideY(begin: 0.04),
+        return GridView.builder(
+          padding: const EdgeInsets.all(10),
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: crossAxisCount,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: width > 1400
+                ? 0.98
+                : width > 1100
+                ? 0.94
+                : width > 800
+                ? 0.90
+                : 0.85,
+          ),
+          itemCount: kots.length,
+          itemBuilder: (context, i) => _KotCard(
+            kot: kots[i],
+            isDark: isDark,
+            onStatusChange: _updateKotStatus,
+            onItemStatusChange: _updateItemStatus,
+          ).animate().fadeIn(delay: (40 * i).ms).slideY(begin: 0.04),
+        );
+      },
     );
   }
 

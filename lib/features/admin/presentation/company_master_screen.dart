@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
 import '../../../core/utils/india_data.dart';
 import '../../../providers/providers.dart';
@@ -120,7 +120,7 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
     try {
       final user = ref.read(authStateProvider).value;
       if (user == null) return;
-      final data = await SupabaseService.getCompany(
+      final data = await Backend.getCompany(
         user.companyId,
       ).timeout(const Duration(seconds: 15));
       if (data != null && mounted) {
@@ -180,7 +180,7 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
       'show_item_images': _showItemImages,
     };
     try {
-      await SupabaseService.updateCompany(
+      await Backend.updateCompany(
         _company!.id,
         updatedData,
       ).timeout(const Duration(seconds: 15));
@@ -229,41 +229,49 @@ class _CompanyMasterScreenState extends ConsumerState<CompanyMasterScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Form(
               key: _formKey,
-              child: ListView(
-                padding: EdgeInsets.fromLTRB(
-                  hPad,
-                  20,
-                  hPad,
-                  24 + mq.padding.bottom,
-                ),
-                children: [
-                  _buildProfileHeader(isDark, isWide),
-                  const SizedBox(height: 20),
+              child: Center(
+                child: ConstrainedBox(
+                  // Caps the form width on a desktop monitor so it doesn't
+                  // stretch edge-to-edge; harmless on phones/tablets since
+                  // they never reach this width anyway.
+                  constraints: const BoxConstraints(maxWidth: 960),
+                  child: ListView(
+                    padding: EdgeInsets.fromLTRB(
+                      hPad,
+                      20,
+                      hPad,
+                      24 + mq.padding.bottom,
+                    ),
+                    children: [
+                      _buildProfileHeader(isDark, isWide),
+                      const SizedBox(height: 20),
 
-                  // On wide screens, show General + Address side-by-side
-                  if (isWide)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: _generalSection(isDark)),
-                        const SizedBox(width: 16),
-                        Expanded(child: _addressSection(isDark)),
+                      // On wide screens, show General + Address side-by-side
+                      if (isWide)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(child: _generalSection(isDark)),
+                            const SizedBox(width: 16),
+                            Expanded(child: _addressSection(isDark)),
+                          ],
+                        )
+                      else ...[
+                        _generalSection(isDark),
+                        const SizedBox(height: 16),
+                        _addressSection(isDark),
                       ],
-                    )
-                  else ...[
-                    _generalSection(isDark),
-                    const SizedBox(height: 16),
-                    _addressSection(isDark),
-                  ],
 
-                  const SizedBox(height: 16),
-                  _taxSection(isDark),
-                  const SizedBox(height: 16),
-                  _operationsSection(isDark),
-                  const SizedBox(height: 28),
-                  _saveButton(isDark, isWide),
-                  SizedBox(height: mq.padding.bottom > 0 ? 0 : 8),
-                ],
+                      const SizedBox(height: 16),
+                      _taxSection(isDark),
+                      const SizedBox(height: 16),
+                      _operationsSection(isDark),
+                      const SizedBox(height: 28),
+                      _saveButton(isDark, isWide),
+                      SizedBox(height: mq.padding.bottom > 0 ? 0 : 8),
+                    ],
+                  ),
+                ),
               ),
             ),
     );

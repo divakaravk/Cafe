@@ -3,7 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
 import '../../../core/widgets/network_error_view.dart';
 
@@ -147,31 +147,40 @@ class QuickBillScreen extends ConsumerWidget {
                     );
                   }
 
-                  return GridView.builder(
-                    padding: const EdgeInsets.all(12),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 4,
-                          childAspectRatio: 1.5,
-                          crossAxisSpacing: 8,
-                          mainAxisSpacing: 8,
-                        ),
-                    itemCount: filteredItems.length,
-                    itemBuilder: (context, index) {
-                      final item = filteredItems[index];
-                      final cartQty = cart
-                          .where((ci) => ci.item.id == item.id)
-                          .fold<int>(0, (sum, ci) => sum + ci.qty);
+                  // A fixed 4 columns leaves tiles huge and sparse on a
+                  // desktop-width window — one more column per ~220px of
+                  // actual available width (LayoutBuilder, not MediaQuery,
+                  // since this may sit next to the permanent web nav panel).
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      final cols = (constraints.maxWidth / 220).floor().clamp(4, 10);
+                      return GridView.builder(
+                        padding: const EdgeInsets.all(12),
+                        gridDelegate:
+                            SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: cols,
+                              childAspectRatio: 1.5,
+                              crossAxisSpacing: 8,
+                              mainAxisSpacing: 8,
+                            ),
+                        itemCount: filteredItems.length,
+                        itemBuilder: (context, index) {
+                          final item = filteredItems[index];
+                          final cartQty = cart
+                              .where((ci) => ci.item.id == item.id)
+                              .fold<int>(0, (sum, ci) => sum + ci.qty);
 
-                      return _QuickItemTile(
-                        item: item,
-                        qty: cartQty,
-                        onTap: () =>
-                            _handleItemTap(context, ref, item, cartNotifier),
-                        isDark: isDark,
-                      ).animate().fadeIn(
-                        delay: Duration(milliseconds: 20 * (index % 16)),
-                        duration: 250.ms,
+                          return _QuickItemTile(
+                            item: item,
+                            qty: cartQty,
+                            onTap: () =>
+                                _handleItemTap(context, ref, item, cartNotifier),
+                            isDark: isDark,
+                          ).animate().fadeIn(
+                            delay: Duration(milliseconds: 20 * (index % 16)),
+                            duration: 250.ms,
+                          );
+                        },
                       );
                     },
                   );
@@ -313,7 +322,7 @@ class QuickBillScreen extends ConsumerWidget {
     final subtotal = cart.fold<double>(0, (sum, ci) => sum + ci.total);
     final discountAmount = subtotal * (discount / 100);
     try {
-      await SupabaseService.createBill(
+      await Backend.createBill(
         companyId: user.companyId,
         billedBy: user.id,
         subtotal: subtotal,

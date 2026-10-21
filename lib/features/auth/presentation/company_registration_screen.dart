@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
 import 'login_screen.dart'
     show AmbientBackground, FocusableTextField, ScaleButton;
@@ -57,7 +57,7 @@ class _CompanyRegistrationScreenState extends State<CompanyRegistrationScreen> {
     }
     setState(() => _isLoading = true);
     try {
-      final res = await SupabaseService.requestCompanyRegistration(
+      final res = await Backend.requestCompanyRegistration(
         company: {
           'company_name': _companyName.text.trim(),
           'company_code': _companyCode.text.trim(),

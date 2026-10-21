@@ -7,8 +7,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
+import '../../../core/utils/network_check.dart' as net;
+import '../../../core/widgets/app_data_table.dart';
+import '../../../core/widgets/window_class.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 
@@ -71,6 +74,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
   bool _isActive = true;
   bool _showPassword = false;
   XFile? _pickedImage;
+  Uint8List? _pickedImageBytes;
   String? _avatarUrl;
   int _selectedTab = 0;
 
@@ -99,16 +103,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
 
   // ─── Network ───────────────────────────────────────────────────────────────
 
-  Future<bool> _hasNetwork() async {
-    try {
-      final result = await InternetAddress.lookup(
-        'google.com',
-      ).timeout(const Duration(seconds: 5));
-      return result.isNotEmpty && result[0].rawAddress.isNotEmpty;
-    } catch (_) {
-      return false;
-    }
-  }
+  Future<bool> _hasNetwork() => net.hasNetwork();
 
   Future<bool> _checkNetworkAndWarn() async {
     if (!await _hasNetwork()) {
@@ -127,7 +122,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
     try {
       final user = ref.read(authStateProvider).value;
       if (user == null) return;
-      final data = await SupabaseService.getUsersForCompany(
+      final data = await Backend.getUsersForCompany(
         user.companyId,
       ).timeout(const Duration(seconds: 15));
       if (mounted) {
@@ -164,7 +159,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
     if (!await _checkNetworkAndWarn()) return;
     setState(() => _isLoading = true);
     try {
-      final permsData = await SupabaseService.getUserPermissions(
+      final permsData = await Backend.getUserPermissions(
         user.id,
       ).timeout(const Duration(seconds: 15));
       if (!mounted) return;
@@ -185,6 +180,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
         _isActive = user.isActive;
         _avatarUrl = user.avatarUrl;
         _pickedImage = null;
+        _pickedImageBytes = null;
         _showPassword = false;
       });
     } on TimeoutException {
@@ -212,6 +208,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
     _isActive = true;
     _avatarUrl = null;
     _pickedImage = null;
+    _pickedImageBytes = null;
     _showPassword = false;
   }
 
@@ -220,7 +217,13 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
       source: ImageSource.gallery,
       imageQuality: 50,
     );
-    if (image != null && mounted) setState(() => _pickedImage = image);
+    if (image == null) return;
+    final bytes = await image.readAsBytes();
+    if (!mounted) return;
+    setState(() {
+      _pickedImage = image;
+      _pickedImageBytes = bytes;
+    });
   }
 
   Future<void> _saveUser() async {
@@ -234,12 +237,11 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
       final userId = _selectedUser?.id ?? const Uuid().v4();
 
       String? currentAvatarUrl = _avatarUrl;
-      if (_pickedImage != null) {
-        final bytes = await _pickedImage!.readAsBytes();
+      if (_pickedImage != null && _pickedImageBytes != null) {
         final ext = _pickedImage!.name.split('.').last;
-        currentAvatarUrl = await SupabaseService.uploadAvatar(
+        currentAvatarUrl = await Backend.uploadAvatar(
           userId,
-          bytes,
+          _pickedImageBytes!,
           ext,
         ).timeout(const Duration(seconds: 30));
       }
@@ -266,7 +268,7 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
       final permissions = _selectedPermissions!.toJson();
       permissions['user_id'] = userId;
 
-      await SupabaseService.upsertUserWithPermissions(
+      await Backend.upsertUserWithPermissions(
         userData: userData,
         permissionData: permissions,
         isNew: _selectedUser == null,
@@ -370,11 +372,9 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
 
     setState(() => _isLoading = true);
     try {
-      await SupabaseService.client
-          .from('user_profiles')
-          .update({'user_active': false, 'is_login': false})
-          .eq('id', user.id)
-          .timeout(const Duration(seconds: 10));
+      await Backend.forceLogoutUser(
+        user.id,
+      ).timeout(const Duration(seconds: 10));
 
       _showSuccess('${user.fullName} has been logged out and deactivated.');
       _loadUsers();
@@ -523,6 +523,10 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
 
     final activeCount = _users.where((u) => u.isActive).length;
 
+    if (context.isWideWindow) {
+      return _buildWideList(isDark, activeCount);
+    }
+
     return ListView(
       padding: EdgeInsets.fromLTRB(
         16,
@@ -537,6 +541,99 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
         // User cards
         ..._users.map((u) => _buildUserCard(u, isDark)),
       ],
+    );
+  }
+
+  /// Desktop/web layout: a searchable/sortable/paginated table instead of a
+  /// phone-style scrolling card list.
+  Widget _buildWideList(bool isDark, int activeCount) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildStatsHeader(isDark, activeCount),
+          const SizedBox(height: 20),
+          AppDataTable<UserProfile>(
+            title: 'All Users',
+            rows: _users,
+            searchText: (u) =>
+                '${u.fullName} ${u.employeeCode} ${u.username ?? ''} ${u.role}',
+            toolbar: [
+              FilledButton.icon(
+                onPressed: _startCreate,
+                icon: const Icon(Icons.person_add_rounded, size: 18),
+                label: Text('Add User', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                style: FilledButton.styleFrom(backgroundColor: AppColors.primaryOrange),
+              ),
+            ],
+            onRowTap: _startEdit,
+            actions: [
+              AppRowAction<UserProfile>('Edit', Icons.edit_outlined, _startEdit),
+              AppRowAction<UserProfile>(
+                'Force Logout',
+                Icons.logout_rounded,
+                (u) => _forceLogoutUser(u),
+              ),
+            ],
+            columns: [
+              AppColumn<UserProfile>(
+                label: 'Name',
+                value: (u) => u.fullName,
+                cell: (u) => Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildAvatar(u, _roleColor(u.role), radius: 14),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        u.fullName,
+                        style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              AppColumn<UserProfile>(
+                label: 'Code / Username',
+                value: (u) => u.employeeCode,
+                minWindow: WindowClass.medium,
+                cell: (u) => Text(
+                  u.username != null ? '${u.employeeCode} · @${u.username}' : u.employeeCode,
+                ),
+              ),
+              AppColumn<UserProfile>(
+                label: 'Role',
+                value: (u) => u.role,
+                size: ColumnSize.S,
+                cell: (u) => _roleChip(u.role, _roleColor(u.role)),
+              ),
+              AppColumn<UserProfile>(
+                label: 'Status',
+                value: (u) => u.isActive ? 'ACTIVE' : 'INACTIVE',
+                size: ColumnSize.S,
+                cell: (u) => _statusPill(u.isActive),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _statusPill(bool active) {
+    final color = active ? AppColors.success : AppColors.error;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        active ? 'ACTIVE' : 'INACTIVE',
+        style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, color: color),
+      ),
     );
   }
 
@@ -905,16 +1002,24 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
             ),
           ),
         ),
-        Expanded(
-          child: IndexedStack(
-            index: _selectedTab,
-            children: [
-              _buildBasicInfoTab(isDark),
-              _buildPermissionsTab(isDark),
-            ],
-          ),
-        ),
+        Expanded(child: _buildEditorTabs(isDark)),
       ],
+    );
+  }
+
+  /// The tab content, centered and width-capped on wide/web windows so a
+  /// single-column form doesn't stretch edge-to-edge on a desktop monitor.
+  Widget _buildEditorTabs(bool isDark) {
+    final tabs = IndexedStack(
+      index: _selectedTab,
+      children: [_buildBasicInfoTab(isDark), _buildPermissionsTab(isDark)],
+    );
+    if (!context.isWideWindow) return tabs;
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 680),
+        child: tabs,
+      ),
     );
   }
 
@@ -1086,9 +1191,9 @@ class _UserMasterScreenState extends ConsumerState<UserMasterScreen> {
                           ],
                         ),
                         child: ClipOval(
-                          child: _pickedImage != null
-                              ? Image.file(
-                                  File(_pickedImage!.path),
+                          child: _pickedImageBytes != null
+                              ? Image.memory(
+                                  _pickedImageBytes!,
                                   fit: BoxFit.cover,
                                 )
                               : _avatarUrl != null

@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,8 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
+import '../../../core/widgets/app_data_table.dart';
+import '../../../core/widgets/window_class.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 import 'stock/recipe_editor_screen.dart';
@@ -58,8 +59,8 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
       if (user == null) return;
 
       final results = await Future.wait([
-        SupabaseService.getItemGroups(user.companyId),
-        SupabaseService.getCompanyHsns(user.companyId),
+        Backend.getItemGroups(user.companyId),
+        Backend.getCompanyHsns(user.companyId),
       ]);
 
       final groups = results[0]
@@ -91,7 +92,7 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
   Future<void> _loadVariants() async {
     if (_selectedGroupId == null) return;
     try {
-      final rows = await SupabaseService.getVariantsByGroup(_selectedGroupId!);
+      final rows = await Backend.getVariantsByGroup(_selectedGroupId!);
       setState(() {
         _variants = rows.map((e) => ItemVariant.fromJson(e)).toList();
       });
@@ -142,6 +143,7 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
     bool isDefault =
         variant?.isDefault ?? _variants.isEmpty; // first item defaults to true
     XFile? pickedImage;
+    Uint8List? pickedImageBytes;
     String? currentImageUrl = variant?.imageUrl;
     bool isSaving = false;
 
@@ -208,7 +210,11 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
                                   imageQuality: 50,
                                 );
                                 if (img != null) {
-                                  setModalState(() => pickedImage = img);
+                                  final bytes = await img.readAsBytes();
+                                  setModalState(() {
+                                    pickedImage = img;
+                                    pickedImageBytes = bytes;
+                                  });
                                 }
                               },
                               child: Container(
@@ -224,10 +230,10 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
                                         ? AppColors.darkBorder
                                         : AppColors.lightBorder,
                                   ),
-                                  image: pickedImage != null
+                                  image: pickedImageBytes != null
                                       ? DecorationImage(
-                                          image: FileImage(
-                                            File(pickedImage!.path),
+                                          image: MemoryImage(
+                                            pickedImageBytes!,
                                           ),
                                           fit: BoxFit.cover,
                                         )
@@ -487,14 +493,14 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
       if (pickedImage != null) {
         final bytes = await pickedImage.readAsBytes();
         final ext = pickedImage.name.split('.').last;
-        finalImageUrl = await SupabaseService.uploadItemImage(id, bytes, ext);
+        finalImageUrl = await Backend.uploadItemImage(id, bytes, ext);
       }
 
       // Empty override => inherit (store 0); otherwise the variant overrides.
       final overrideRate =
           overrideRateRaw.isEmpty ? 0.0 : (double.tryParse(overrideRateRaw) ?? 0);
 
-      await SupabaseService.upsertVariant({
+      await Backend.upsertVariant({
         'id': id,
         'item_id': _selectedGroupId,
         'variant_name': name,
@@ -512,7 +518,7 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
 
       // Enforce a single default per group + sync the group pointer.
       if (isDefault) {
-        await SupabaseService.setDefaultVariant(
+        await Backend.setDefaultVariant(
           itemId: _selectedGroupId!,
           variantId: id,
         );
@@ -804,6 +810,10 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
       );
     }
 
+    if (context.isWideWindow) {
+      return _buildWideVariantList(isDark, filtered);
+    }
+
     return RefreshIndicator(
       onRefresh: _loadVariants,
       child: ListView.builder(
@@ -1003,6 +1013,106 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
     );
   }
 
+  /// Desktop/web layout: searchable/sortable/paginated table instead of a
+  /// phone-style scrolling card list.
+  Widget _buildWideVariantList(bool isDark, List<ItemVariant> filtered) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+      child: AppDataTable<ItemVariant>(
+        rows: filtered,
+        searchText: (v) => v.variantName,
+        onRowTap: _addOrEditVariant,
+        actions: [
+          AppRowAction<ItemVariant>(
+            'Edit Recipe',
+            Icons.menu_book_rounded,
+            (v) => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => RecipeEditorScreen(
+                  itemVariantId: v.id,
+                  variantName: v.variantName,
+                ),
+              ),
+            ),
+          ),
+          AppRowAction<ItemVariant>('Edit', Icons.edit_rounded, _addOrEditVariant),
+          AppRowAction<ItemVariant>('Delete', Icons.delete_outline_rounded, _deleteVariant),
+        ],
+        columns: [
+          AppColumn<ItemVariant>(
+            label: 'Selling Item',
+            value: (v) => v.variantName,
+            cell: (v) => Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _foodTypeDot(v.foodType),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    v.variantName,
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (v.isDefault) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryAmber,
+                      borderRadius: BorderRadius.circular(5),
+                    ),
+                    child: Text(
+                      'DEFAULT',
+                      style: GoogleFonts.inter(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          AppColumn<ItemVariant>(
+            label: 'Rate',
+            value: (v) => _selectedGroup?.effectiveRateFor(v) ?? v.baseRate,
+            numeric: true,
+            size: ColumnSize.S,
+            cell: (v) {
+              final rate = _selectedGroup?.effectiveRateFor(v) ?? v.baseRate;
+              return Text(
+                v.hasPriceOverride ? '₹${rate.toStringAsFixed(0)}' : '₹${rate.toStringAsFixed(0)} (inherited)',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+              );
+            },
+          ),
+          AppColumn<ItemVariant>(
+            label: 'HSN',
+            value: (v) => v.hsnId ?? '',
+            minWindow: WindowClass.medium,
+            cell: (v) {
+              final hsn = _hsns.firstWhere((h) => h['id'] == v.hsnId, orElse: () => {});
+              return Text(hsn.isNotEmpty ? '${hsn['hsn_code']}' : '—');
+            },
+          ),
+          AppColumn<ItemVariant>(
+            label: 'Status',
+            value: (v) => !v.isActive ? 'INACTIVE' : (!v.isAvailable ? 'UNAVAILABLE' : 'AVAILABLE'),
+            size: ColumnSize.S,
+            cell: (v) => !v.isActive
+                ? _statusPill('Inactive', AppColors.error)
+                : (!v.isAvailable
+                    ? _statusPill('Unavailable', AppColors.warning)
+                    : const SizedBox.shrink()),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _statusPill(String label, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
@@ -1171,13 +1281,13 @@ class _ItemVariantScreenState extends ConsumerState<ItemVariantScreen> {
 
     if (confirm == true) {
       try {
-        await SupabaseService.deleteVariant(v.id);
+        await Backend.deleteVariant(v.id);
         // If we removed the default, promote the next sellable item.
         if (v.isDefault) {
           await _loadVariants();
           final next = _variants.where((x) => x.isActive).toList();
           if (next.isNotEmpty) {
-            await SupabaseService.setDefaultVariant(
+            await Backend.setDefaultVariant(
               itemId: _selectedGroupId!,
               variantId: next.first.id,
             );

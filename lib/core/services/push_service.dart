@@ -3,7 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'supabase_service.dart';
+import '../backend/backend.dart';
 
 /// High-importance channel so foreground OTP banners pop as heads-up.
 const AndroidNotificationChannel _kChannel = AndroidNotificationChannel(
@@ -106,7 +106,7 @@ class PushService {
     final t = await token();
     if (t == null) return false;
     try {
-      await SupabaseService.registerSuperAdminDevice(t, label: label);
+      await Backend.registerSuperAdminDevice(t, label: label);
       return true;
     } catch (e) {
       debugPrint('registerAsSuperAdmin failed: $e');

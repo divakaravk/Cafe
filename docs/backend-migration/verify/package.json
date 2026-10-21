@@ -1,0 +1,13 @@
+{
+  "name": "cafe-schema-verify",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Re-runnable checks for docs/backend-migration/schema.mysql.sql on a throw-away MySQL 8.4",
+  "scripts": {
+    "mysql": "node start-mysql.js",
+    "check:schema": "node schema-check.js",
+    "check:behaviour": "node behaviour-check.js",
+    "check:driver": "node driver-cast-check.js && node rounding-check.js"
+  },
+  "dependencies": { "mysql-memory-server": "^1.16.0", "mysql2": "^3.11.0" }
+}

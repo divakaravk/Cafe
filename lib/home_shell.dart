@@ -5,10 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'core/theme/app_colors.dart';
 import 'core/constants/app_constants.dart';
+import 'core/widgets/window_class.dart';
 import 'models/models.dart';
 import 'providers/providers.dart';
-import 'features/auth/presentation/login_screen.dart';
-import 'features/auth/presentation/owner_dashboard_screen.dart';
 import 'features/pos/presentation/modern_pos_screen.dart';
 import 'features/pos/presentation/quick_bill_screen.dart';
 import 'features/pos/presentation/classic_pos_screen.dart';
@@ -23,38 +22,20 @@ import 'features/kitchen/kitchen_screen.dart';
 import 'features/admin/presentation/my_profile_screen.dart';
 import 'features/admin/presentation/stock/stock_dashboard_screen.dart';
 
-/// Main app shell — switches between login and POS based on auth state
-class HomeShell extends ConsumerWidget {
-  const HomeShell({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final authState = ref.watch(authStateProvider);
-
-    return authState.maybeWhen(
-      data: (user) {
-        if (user == null) return const LoginScreen();
-        // The app owner isn't tied to a company — route to the dedicated
-        // company-registration approvals dashboard instead of the POS shell.
-        if (user.isOwner) return OwnerDashboardScreen(owner: user);
-        return _AuthenticatedShell(user: user);
-      },
-      // Keep showing LoginScreen during loading/error if no user is authenticated
-      orElse: () => const LoginScreen(),
-    );
-  }
-}
-
-class _AuthenticatedShell extends ConsumerStatefulWidget {
+/// The signed-in app shell (POS/Tables/Bills + admin nav) — rendered by the
+/// `/` route once `AppRouter`'s redirect confirms a non-owner, authenticated
+/// user. Login/owner-dashboard routing now lives in
+/// `core/routing/app_router.dart`, not here.
+class AuthenticatedShell extends ConsumerStatefulWidget {
   final UserProfile user;
-  const _AuthenticatedShell({required this.user});
+  const AuthenticatedShell({super.key, required this.user});
 
   @override
-  ConsumerState<_AuthenticatedShell> createState() =>
-      _AuthenticatedShellState();
+  ConsumerState<AuthenticatedShell> createState() =>
+      AuthenticatedShellState();
 }
 
-class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
+class AuthenticatedShellState extends ConsumerState<AuthenticatedShell>
     with WidgetsBindingObserver {
   int _selectedNavIndex = 0;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -111,12 +92,26 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
             ? UserPermission.all(user.id)
             : UserPermission.forRole(user.id, user.role));
 
+    final isWide = context.isWideWindow;
+
     // Kitchen role: dedicated full-screen KOT display.
     if (_isKitchen) {
       return Scaffold(
         key: _scaffoldKey,
-        drawer: _buildUnifiedDrawer(context, isDark, perms, const []),
-        body: KitchenScreen(companyId: user.companyId),
+        drawer: isWide
+            ? null
+            : _buildNavPanel(context, isDark, perms, const [], isPermanent: false),
+        body: isWide
+            ? Row(
+                children: [
+                  SizedBox(
+                    width: 300,
+                    child: _buildNavPanel(context, isDark, perms, const [], isPermanent: true),
+                  ),
+                  Expanded(child: KitchenScreen(companyId: user.companyId)),
+                ],
+              )
+            : KitchenScreen(companyId: user.companyId),
       );
     }
 
@@ -172,8 +167,20 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
 
     return Scaffold(
       key: _scaffoldKey,
-      drawer: _buildUnifiedDrawer(context, isDark, perms, modules),
-      body: modules[safeIndex].screen,
+      drawer: isWide
+          ? null
+          : _buildNavPanel(context, isDark, perms, modules, isPermanent: false),
+      body: isWide
+          ? Row(
+              children: [
+                SizedBox(
+                  width: 300,
+                  child: _buildNavPanel(context, isDark, perms, modules, isPermanent: true),
+                ),
+                Expanded(child: modules[safeIndex].screen),
+              ],
+            )
+          : modules[safeIndex].screen,
     );
   }
 
@@ -186,31 +193,34 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
       p.canManageStock ||
       p.canManageTables;
 
-  Widget _buildUnifiedDrawer(
+  /// Renders the app's navigation as either a slide-out [Drawer] (phones —
+  /// [isPermanent] false) or a permanently visible side panel next to the
+  /// body (desktop/web — [isPermanent] true). Both share one content tree so
+  /// the nav never drifts between the two layouts.
+  Widget _buildNavPanel(
     BuildContext context,
     bool isDark,
     UserPermission perms,
-    List<_NavModule> modules,
-  ) {
+    List<_NavModule> modules, {
+    required bool isPermanent,
+  }) {
     final mediaQuery = MediaQuery.of(context);
     final isMobile = mediaQuery.size.width < 600;
+    // A slide-out Drawer has its own local-history entry that Navigator.pop
+    // closes; a permanent panel has none, so popping there would instead pop
+    // the real screen underneath. Route every "close the nav" tap through
+    // this so it's a no-op when the panel is permanent.
+    void close() {
+      if (!isPermanent) Navigator.pop(context);
+    }
 
-    return Theme(
-      data: Theme.of(context).copyWith(
-        drawerTheme: const DrawerThemeData(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-        ),
-      ),
-      child: Drawer(
-        width: isMobile ? 260.0 : 280.0,
-        child: SafeArea(
-          child: Container(
-            margin: const EdgeInsets.only(
+    final content = SafeArea(
+        child: Container(
+            margin: EdgeInsets.only(
               top: 12,
               bottom: 12,
               left: 12,
-              right: 0,
+              right: isPermanent ? 12 : 0,
             ),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(28),
@@ -263,7 +273,7 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
                               _buildDrawerItem(
                                 Icons.restaurant_rounded,
                                 'Kitchen Display',
-                                () => Navigator.pop(context),
+                                close,
                                 isDark,
                                 isSelected: true,
                               ),
@@ -275,7 +285,7 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
                                   e.value.label,
                                   () {
                                     setState(() => _selectedNavIndex = e.key);
-                                    Navigator.pop(context);
+                                    close();
                                   },
                                   isDark,
                                   isSelected: _selectedNavIndex == e.key,
@@ -286,7 +296,7 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
                                   Icons.soup_kitchen_rounded,
                                   'Kitchen Monitor',
                                   () {
-                                    Navigator.pop(context);
+                                    close();
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -371,7 +381,7 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
                                     Icons.warehouse_rounded,
                                     'Stock & Inventory',
                                     () {
-                                      Navigator.pop(context);
+                                      close();
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
@@ -390,7 +400,7 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
                               Icons.person_outline_rounded,
                               'My Profile',
                               () {
-                                Navigator.pop(context);
+                                close();
                                 Navigator.push(
                                   context,
                                   MaterialPageRoute(
@@ -419,8 +429,18 @@ class _AuthenticatedShellState extends ConsumerState<_AuthenticatedShell>
               ),
             ),
           ),
+        );
+
+    if (isPermanent) return content;
+
+    return Theme(
+      data: Theme.of(context).copyWith(
+        drawerTheme: const DrawerThemeData(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
         ),
       ),
+      child: Drawer(width: isMobile ? 260.0 : 280.0, child: content),
     );
   }
 

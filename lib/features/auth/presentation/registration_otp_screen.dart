@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
 import 'login_screen.dart' show AmbientBackground, ScaleButton;
 import 'register_admin_screen.dart';
@@ -45,7 +45,7 @@ class _RegistrationOtpScreenState extends State<RegistrationOtpScreen> {
     }
     setState(() => _isLoading = true);
     try {
-      final res = await SupabaseService.verifyCompanyRegistrationOtp(
+      final res = await Backend.verifyCompanyRegistrationOtp(
         registrationId: widget.registrationId,
         code: code,
       );

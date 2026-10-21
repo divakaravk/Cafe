@@ -9,6 +9,13 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+analyzer:
+  exclude:
+    # Reference snippets meant to be copied into a separate throwaway project
+    # (see docs/web-view/prototype/README.md) — not part of this app, and
+    # depend on packages this pubspec doesn't declare.
+    - docs/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

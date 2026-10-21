@@ -1,8 +1,9 @@
 import 'dart:math' show min;
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:cafe/core/services/supabase_service.dart';
+import 'package:cafe/core/backend/backend.dart';
 import 'package:cafe/core/utils/api_helper.dart';
 import 'package:cafe/core/widgets/network_error_view.dart';
+import 'package:cafe/core/widgets/window_class.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -223,10 +224,11 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                   ),
                   child: Row(
                     children: [
-                      IconButton(
-                        icon: const Icon(Icons.menu_rounded),
-                        onPressed: () => Scaffold.of(context).openDrawer(),
-                      ),
+                      if (!context.isWideWindow)
+                        IconButton(
+                          icon: const Icon(Icons.menu_rounded),
+                          onPressed: () => Scaffold.of(context).openDrawer(),
+                        ),
                       const SizedBox(width: 4),
                       Icon(
                         Icons.table_restaurant_rounded,
@@ -278,28 +280,43 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                         return _naturalTableCompare(a.tableNumber, b.tableNumber);
                       });
 
-                      return GridView.builder(
-                        padding: EdgeInsets.all(isTablet ? 20 : 8),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: isTablet ? 3 : 2,
-                          childAspectRatio: isTablet ? 1.8 : 1.45,
-                          crossAxisSpacing: isTablet ? 16 : 8,
-                          mainAxisSpacing: isTablet ? 16 : 8,
-                        ),
-                        itemCount: sortedTables.length,
-                        itemBuilder: (context, index) {
-                          final table = sortedTables[index];
-                          final isSelected = _selectedTable?.id == table.id;
-
-                          return RepaintBoundary(
-                            child: _TableCard(
-                              key: ValueKey(table.id),
-                              table: table,
-                              isDark: isDark,
-                              isSelected: isSelected,
-                              blink: _blink,
-                              onTap: () => _handleTableTap(table),
+                      // LayoutBuilder, not the outer `isTablet` (MediaQuery-
+                      // derived): the grid's actual available width shrinks
+                      // by ~300px next to the permanent web nav panel
+                      // (home_shell.dart), so the column count needs the real
+                      // local constraint, not the whole-window guess.
+                      return LayoutBuilder(
+                        builder: (context, constraints) {
+                          final gridWide = constraints.maxWidth > 800;
+                          final cols = constraints.maxWidth > 1400
+                              ? 4
+                              : gridWide
+                              ? 3
+                              : 2;
+                          return GridView.builder(
+                            padding: EdgeInsets.all(gridWide ? 20 : 8),
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: cols,
+                              childAspectRatio: gridWide ? 1.8 : 1.45,
+                              crossAxisSpacing: gridWide ? 16 : 8,
+                              mainAxisSpacing: gridWide ? 16 : 8,
                             ),
+                            itemCount: sortedTables.length,
+                            itemBuilder: (context, index) {
+                              final table = sortedTables[index];
+                              final isSelected = _selectedTable?.id == table.id;
+
+                              return RepaintBoundary(
+                                child: _TableCard(
+                                  key: ValueKey(table.id),
+                                  table: table,
+                                  isDark: isDark,
+                                  isSelected: isSelected,
+                                  blink: _blink,
+                                  onTap: () => _handleTableTap(table),
+                                ),
+                              );
+                            },
                           );
                         },
                       );
@@ -362,9 +379,9 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
     setState(() => _overviewLoading = true);
     try {
       final results = await Future.wait([
-        SupabaseService.getCoversForSession(sessionId),
-        SupabaseService.getCoverTotals(sessionId),
-        SupabaseService.getDetailedItemsForSession(sessionId),
+        Backend.getCoversForSession(sessionId),
+        Backend.getCoverTotals(sessionId),
+        Backend.getDetailedItemsForSession(sessionId),
       ]);
       if (mounted) {
         setState(() {
@@ -409,7 +426,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
 
     setState(() => _overviewSaving = true);
     try {
-      await SupabaseService.checkoutCover(
+      await Backend.checkoutCover(
         coverId: cover.id,
         sessionId: sessionId,
         paymentMode: mode,
@@ -456,7 +473,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
                   .map((c) => c.coverNumber)
                   .reduce((a, b) => a > b ? a : b) +
               1;
-      final data = await SupabaseService.createCover(
+      final data = await Backend.createCover(
         sessionId: sessionId,
         companyId: widget.companyId,
         coverNumber: nextNumber,
@@ -497,7 +514,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
     if (id == null || id == _orderSummaryTableId) return;
     _orderSummaryTableId = id;
     setState(() {
-      _orderSummaryFuture = SupabaseService.getOrderSummaryForTable(id);
+      _orderSummaryFuture = Backend.getOrderSummaryForTable(id);
     });
   }
 
@@ -1823,7 +1840,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
 
     setState(() => _overviewSaving = true);
     try {
-      await SupabaseService.deleteCover(cover.id);
+      await Backend.deleteCover(cover.id);
       if (mounted) {
         setState(() {
           _overviewCovers.removeWhere((c) => c.id == cover.id);
@@ -2904,7 +2921,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
     setState(() => _isSavingOrder = true);
     try {
       await safeApiCall(
-        () => SupabaseService.checkoutTable(
+        () => Backend.checkoutTable(
           tableId: _selectedTable!.id,
           paymentMode: _checkoutPaymentMode,
           discountPercent: _checkoutDiscount,
@@ -2948,7 +2965,7 @@ class _TablesScreenState extends ConsumerState<TablesScreen>
 
     try {
       final result = await safeApiCall(
-        () => SupabaseService.saveOrderWithKot(
+        () => Backend.saveOrderWithKot(
           companyId: user.companyId,
           tableId: _selectedTable!.id,
           openedBy: user.id,
@@ -3861,7 +3878,7 @@ class _TableBillingSheetState extends ConsumerState<_TableBillingSheet> {
 
     try {
       final session = await safeApiCall(
-        () => SupabaseService.createOrder(
+        () => Backend.createOrder(
           companyId: widget.user.companyId,
           tableId: widget.table.id,
           openedBy: widget.user.id,
@@ -3869,7 +3886,7 @@ class _TableBillingSheetState extends ConsumerState<_TableBillingSheet> {
       );
 
       await safeApiCall(
-        () => SupabaseService.createBill(
+        () => Backend.createBill(
           companyId: widget.user.companyId,
           billedBy: widget.user.id,
           tableSessionId: session['id'],

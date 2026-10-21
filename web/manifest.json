@@ -1,12 +1,12 @@
 {
-    "name": "cafe",
-    "short_name": "cafe",
+    "name": "RasaBhojan POS",
+    "short_name": "RasaBhojan",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#ffffff",
-    "theme_color": "#ffffff",
-    "description": "A new Flutter project.",
-    "orientation": "portrait-primary",
+    "background_color": "#F8F6F3",
+    "theme_color": "#E65100",
+    "description": "RasaBhojan cafe point-of-sale — billing, tables, kitchen and admin.",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

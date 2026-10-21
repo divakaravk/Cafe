@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/inventory_models.dart';
-import '../core/services/supabase_service.dart';
+import '../core/backend/backend.dart';
 
 /// Riverpod providers for the Inventory / Stock module. Follows the same
 /// `FutureProvider.family` + service-returns-raw-rows / provider-maps-models
@@ -11,7 +11,7 @@ final rawMaterialsProvider = FutureProvider.family<List<RawMaterial>, String>((
   ref,
   companyId,
 ) async {
-  final res = await SupabaseService.getRawMaterials(companyId);
+  final res = await Backend.getRawMaterials(companyId);
   return res.map((e) => RawMaterial.fromJson(e)).toList();
 });
 
@@ -21,14 +21,14 @@ final variantRecipeProvider =
       ref,
       itemVariantId,
     ) async {
-      final res = await SupabaseService.getRecipeForVariant(itemVariantId);
+      final res = await Backend.getRecipeForVariant(itemVariantId);
       return res.map((e) => VariantRecipe.fromJson(e)).toList();
     });
 
 // ─── CURRENT STOCK (by company) ──────────────────────────
 final currentStockProvider =
     FutureProvider.family<List<CurrentStockRow>, String>((ref, companyId) async {
-      final res = await SupabaseService.getCurrentStock(companyId);
+      final res = await Backend.getCurrentStock(companyId);
       return res.map((e) => CurrentStockRow.fromJson(e)).toList();
     });
 
@@ -54,7 +54,7 @@ final staffConsumptionProvider =
       ref,
       args,
     ) async {
-      final res = await SupabaseService.getStaffConsumption(
+      final res = await Backend.getStaffConsumption(
         args.companyId,
         from: args.from,
         to: args.to,

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/services/supabase_service.dart';
+import '../../core/backend/backend.dart';
 import '../../core/utils/api_helper.dart';
 import '../../models/models.dart';
 import '../../providers/providers.dart';
@@ -73,8 +73,8 @@ class _CoverSelectionSheetState extends ConsumerState<CoverSelectionSheet> {
     }
     try {
       final results = await Future.wait([
-        SupabaseService.getCoversForSession(_sessionId!),
-        SupabaseService.getCoverTotals(_sessionId!),
+        Backend.getCoversForSession(_sessionId!),
+        Backend.getCoverTotals(_sessionId!),
       ]);
       setState(() {
         _covers = (results[0] as List<Map<String, dynamic>>)
@@ -93,7 +93,7 @@ class _CoverSelectionSheetState extends ConsumerState<CoverSelectionSheet> {
     setState(() => _saving = true);
     try {
       final nextNumber = _covers.isEmpty ? 1 : _covers.last.coverNumber + 1;
-      final data = await SupabaseService.createCover(
+      final data = await Backend.createCover(
         sessionId: _sessionId!,
         companyId: widget.companyId,
         coverNumber: nextNumber,
@@ -130,7 +130,7 @@ class _CoverSelectionSheetState extends ConsumerState<CoverSelectionSheet> {
 
     setState(() => _saving = true);
     try {
-      await SupabaseService.checkoutCover(
+      await Backend.checkoutCover(
         coverId: cover.id,
         sessionId: _sessionId!,
         paymentMode: mode,

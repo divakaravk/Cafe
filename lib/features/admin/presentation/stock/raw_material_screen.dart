@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/services/supabase_service.dart';
+import '../../../../core/backend/backend.dart';
 import '../../../../core/utils/api_helper.dart';
 import '../../../../models/inventory_models.dart';
 import '../../../../providers/providers.dart';
@@ -50,7 +50,7 @@ class _RawMaterialScreenState extends ConsumerState<RawMaterialScreen> {
     // Warn if the material is still referenced by recipes.
     int usage = 0;
     try {
-      usage = await SupabaseService.countRecipeLinesUsingMaterial(m.id);
+      usage = await Backend.countRecipeLinesUsingMaterial(m.id);
     } catch (_) {}
     if (!mounted) return;
 
@@ -84,7 +84,7 @@ class _RawMaterialScreenState extends ConsumerState<RawMaterialScreen> {
     if (confirm != true) return;
 
     try {
-      await SupabaseService.deleteRawMaterial(m.id);
+      await Backend.deleteRawMaterial(m.id);
       await _refresh(m.companyId);
       _showSnack('Material deactivated', AppColors.success);
     } catch (e) {
@@ -372,7 +372,7 @@ class _RawMaterialEditorSheetState
         costPerUnit: double.tryParse(_cost.text.trim()) ?? 0,
         isActive: widget.existing?.isActive ?? true,
       );
-      await SupabaseService.upsertRawMaterial(material.toJson());
+      await Backend.upsertRawMaterial(material.toJson());
       if (mounted) Navigator.pop(context, true);
     } catch (e) {
       setState(() => _saving = false);

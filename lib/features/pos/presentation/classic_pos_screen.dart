@@ -3,10 +3,11 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
 import '../../../core/widgets/network_error_view.dart';
 import '../../../core/widgets/pos_widgets.dart';
+import '../../../core/widgets/window_class.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 
@@ -32,8 +33,6 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final size = MediaQuery.of(context).size;
-    final isTablet = size.width > 800;
     final cart = ref.watch(cartProvider(null));
     final cartNotifier = ref.read(cartProvider(null).notifier);
     final user = ref.watch(authStateProvider).value;
@@ -46,7 +45,14 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
     final discountAmount = subtotal * (discount / 100);
     final total = subtotal - discountAmount;
 
-    return Scaffold(
+    // `LayoutBuilder`, not `MediaQuery`, because this screen may be rendered
+    // next to the permanent web nav panel (home_shell.dart) that eats 300px
+    // of the actual window — MediaQuery would still report the full window
+    // width and misjudge whether there's real room for a side-by-side cart.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isTablet = constraints.maxWidth > 800;
+        return Scaffold(
       body: SafeArea(
         child: Row(
           children: [
@@ -119,10 +125,11 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
                             ),
                           ],
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.menu_rounded, size: 20),
-                          onPressed: () => Scaffold.of(context).openDrawer(),
-                        ),
+                        if (!context.isWideWindow)
+                          IconButton(
+                            icon: const Icon(Icons.menu_rounded, size: 20),
+                            onPressed: () => Scaffold.of(context).openDrawer(),
+                          ),
                       ],
                     ),
                   ),
@@ -197,6 +204,8 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
       bottomSheet: !isTablet && cart.isNotEmpty
           ? _buildMobileBar(total, cart.length, isDark)
           : null,
+        );
+      },
     );
   }
 
@@ -640,7 +649,7 @@ class _ClassicPosScreenState extends ConsumerState<ClassicPosScreen> {
     final subtotal = cart.fold<double>(0, (sum, ci) => sum + ci.total);
     final discountAmount = subtotal * (discount / 100);
     try {
-      await SupabaseService.createBill(
+      await Backend.createBill(
         companyId: user.companyId,
         billedBy: user.id,
         subtotal: subtotal,

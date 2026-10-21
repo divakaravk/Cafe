@@ -8,11 +8,13 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import '../../core/theme/app_colors.dart';
+import '../../core/widgets/app_data_table.dart';
+import '../../core/widgets/window_class.dart';
 import '../../models/models.dart';
 import '../../providers/report_provider.dart';
 import '../../providers/providers.dart'
     show allItemsProvider, permissionsProvider, companyProvider;
-import '../../core/services/supabase_service.dart';
+import '../../core/backend/backend.dart';
 import '../../core/utils/api_helper.dart';
 import 'widgets/report_widgets.dart';
 
@@ -580,6 +582,8 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
           // Bills ledger list
           if (filteredBills.isEmpty)
             _buildEmptyState(isDark)
+          else if (context.isWideWindow)
+            _buildLedgerTable(filteredBills, isDark, dateFormat)
           else
             ...filteredBills.map(
               (bill) => _BillCard(
@@ -593,6 +597,72 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
           const SizedBox(height: 40),
         ],
       ),
+    );
+  }
+
+  /// Desktop/web layout: a searchable/sortable/paginated table instead of
+  /// the scrolling `_BillCard` ledger.
+  Widget _buildLedgerTable(List<Bill> bills, bool isDark, DateFormat dateFormat) {
+    return AppDataTable<Bill>(
+      rows: bills,
+      searchText: (b) => '${b.billNumber ?? ''} ${b.tableName ?? ''} ${b.paymentMode}',
+      onRowTap: (b) => _showBillDetails(context, b, isDark, dateFormat),
+      columns: [
+        AppColumn<Bill>(
+          label: 'Bill #',
+          value: (b) => b.billNumber ?? b.id,
+          cell: (b) => Text(
+            b.billNumber ?? b.id.substring(0, 8),
+            style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+          ),
+        ),
+        AppColumn<Bill>(
+          label: 'Date',
+          value: (b) => b.createdAt ?? DateTime(0),
+          minWindow: WindowClass.medium,
+          cell: (b) => Text(b.createdAt != null ? dateFormat.format(b.createdAt!.toLocal()) : '—'),
+        ),
+        AppColumn<Bill>(
+          label: 'Table',
+          value: (b) => b.tableName ?? '',
+          minWindow: WindowClass.expanded,
+          cell: (b) => Text(b.tableName ?? '—'),
+        ),
+        AppColumn<Bill>(
+          label: 'Payment',
+          value: (b) => b.paymentMode,
+          size: ColumnSize.S,
+        ),
+        AppColumn<Bill>(
+          label: 'Amount',
+          value: (b) => b.totalAmount,
+          numeric: true,
+          cell: (b) => Text(
+            '₹${b.totalAmount.toStringAsFixed(2)}',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+          ),
+        ),
+        AppColumn<Bill>(
+          label: 'Status',
+          value: (b) => b.isVoided ? 'CANCELLED' : b.status,
+          size: ColumnSize.S,
+          cell: (b) {
+            final voided = b.isVoided;
+            final color = voided ? AppColors.error : AppColors.success;
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                voided ? 'CANCELLED' : b.status.toUpperCase(),
+                style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, color: color),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -616,10 +686,11 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
       ),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.menu_rounded),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
+          if (!context.isWideWindow)
+            IconButton(
+              icon: const Icon(Icons.menu_rounded),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            ),
           const SizedBox(width: 4),
           Icon(
             Icons.analytics_rounded,
@@ -1435,7 +1506,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
     if (confirmed != true) return;
 
     try {
-      await SupabaseService.cancelBill(billId: bill.id);
+      await Backend.cancelBill(billId: bill.id);
       await ref.read(reportProvider(widget.companyId).notifier).fetchReport();
       if (sheetContext.mounted) Navigator.pop(sheetContext);
       if (mounted) {
@@ -2145,7 +2216,7 @@ class _BillCard extends StatelessWidget {
 }
 
 /// Editable bill sheet — adjust line quantities, remove items, then save.
-/// Recomputes subtotal/tax/total live and persists via [SupabaseService.updateBill].
+/// Recomputes subtotal/tax/total live and persists via [Backend.updateBill].
 class _BillEditSheet extends ConsumerStatefulWidget {
   final Bill bill;
   final String companyId;
@@ -2207,7 +2278,7 @@ class _BillEditSheetState extends ConsumerState<_BillEditSheet> {
           )
           .toList();
 
-      await SupabaseService.updateBill(
+      await Backend.updateBill(
         billId: widget.bill.id,
         items: items,
         removedItemIds: _removed.toList(),

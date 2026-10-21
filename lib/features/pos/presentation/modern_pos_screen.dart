@@ -5,9 +5,10 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
 import '../../../core/widgets/pos_widgets.dart';
+import '../../../core/widgets/window_class.dart';
 import '../../../models/models.dart';
 import '../../../providers/providers.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -213,7 +214,15 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
         ref.watch(companyProvider(user.companyId)).value?.showItemImages ??
         true;
 
-    return Scaffold(
+    // `MediaQuery`'s width is the whole browser window, not the space this
+    // screen actually gets once the permanent web nav panel (home_shell.dart)
+    // takes its 300px — `LayoutBuilder` measures what's really available here,
+    // so the desktop cart panel only appears when there's genuinely room for
+    // menu + cart side-by-side, on any platform/window shape.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final desktopCart = constraints.maxWidth >= 1000;
+        return Scaffold(
       key: _scaffoldKey,
       // Keep the search field's cursor/keyboard from lingering around the side
       // menus. Unfocus when a drawer opens; and again after it closes via a
@@ -222,7 +231,11 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
       onDrawerChanged: _dismissSearchFocusOnDrawer,
       onEndDrawerChanged: _dismissSearchFocusOnDrawer,
       drawer: _buildLeftMenu(isDark, user),
-      endDrawer: Padding(
+      // A permanent side panel replaces the swipe-out cart drawer once there's
+      // real desktop width — nothing left for it to toggle.
+      endDrawer: desktopCart
+          ? null
+          : Padding(
         padding: const EdgeInsets.fromLTRB(0, 16, 16, 16),
         child: Drawer(
           width: isTablet ? 340 : size.width * 0.80,
@@ -232,7 +245,42 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
           child: _buildBillingPanel(cart, cartNotifier, isDark, user),
         ),
       ),
-      body: GestureDetector(
+      body: Row(
+        children: [
+          Expanded(child: _buildMenuArea(isDark, showImages, user, itemGroupsAsync, cart, isTablet)),
+          if (desktopCart)
+            Container(
+              width: 380,
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    color: isDark ? AppColors.darkBorder : AppColors.lightBorder,
+                  ),
+                ),
+              ),
+              child: _buildBillingPanel(cart, cartNotifier, isDark, user),
+            ),
+        ],
+      ),
+      // Bottom sheet billing for mobile — the desktop panel above already
+      // covers the desktopCart case, so this only ever applies on phones.
+      bottomSheet: !isTablet && !desktopCart && cart.isNotEmpty
+          ? _buildMobileOrderPanel(cart, user)
+          : null,
+        );
+      },
+    );
+  }
+
+  Widget _buildMenuArea(
+    bool isDark,
+    bool showImages,
+    UserProfile user,
+    AsyncValue<List<Item>> itemGroupsAsync,
+    List<CartItem> cart,
+    bool isTablet,
+  ) {
+    return GestureDetector(
         // Tapping anywhere outside the search field drops its focus, so the
         // cursor only shows while the field itself is tapped. Translucent so
         // taps still reach the grid tiles / buttons underneath.
@@ -332,12 +380,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
             Positioned(top: 90, right: 20, child: _buildFilterPanel(isDark)),
           ],
         ),
-      ),
-      // Bottom sheet billing for mobile
-      bottomSheet: !isTablet && cart.isNotEmpty
-          ? _buildMobileOrderPanel(cart, user)
-          : null,
-    );
+      );
   }
 
   // ─── FIXED TOP BAR (loading / error / empty states) ────
@@ -712,35 +755,37 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
   Widget _buildSideToggles(bool isTablet) {
     return Stack(
       children: [
-        // Left Edge Toggle (Open Drawer)
-        Positioned(
-          left: 0,
-          top: 0,
-          bottom: 0,
-          child: Center(
-            child: GestureDetector(
-              onTap: () => _scaffoldKey.currentState?.openDrawer(),
-              child: Container(
-                height: 60,
-                width: 14,
-                decoration: BoxDecoration(
-                  color: AppColors.primaryOrange.withValues(alpha: 0.9),
-                  borderRadius: const BorderRadius.horizontal(
-                    right: Radius.circular(8),
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.1),
-                      blurRadius: 4,
-                      offset: const Offset(2, 0),
+        // Left Edge Toggle (Open Drawer) — pointless once the nav is a
+        // permanent side panel on wide/web layouts, so hide it there.
+        if (!context.isWideWindow)
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: GestureDetector(
+                onTap: () => _scaffoldKey.currentState?.openDrawer(),
+                child: Container(
+                  height: 60,
+                  width: 14,
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryOrange.withValues(alpha: 0.9),
+                    borderRadius: const BorderRadius.horizontal(
+                      right: Radius.circular(8),
                     ),
-                  ],
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 4,
+                        offset: const Offset(2, 0),
+                      ),
+                    ],
+                  ),
+                  child: Icon(Icons.menu_rounded, color: Colors.white, size: 14),
                 ),
-                child: Icon(Icons.menu_rounded, color: Colors.white, size: 14),
               ),
             ),
           ),
-        ),
         // Right Edge Toggle (Visual cue ONLY)
         if (isTablet)
           Positioned(
@@ -1691,7 +1736,7 @@ class _ModernPosScreenState extends ConsumerState<ModernPosScreen>
 
     try {
       await safeApiCall(
-        () => SupabaseService.createBill(
+        () => Backend.createBill(
           companyId: user.companyId,
           billedBy: user.id,
           subtotal: subtotal,

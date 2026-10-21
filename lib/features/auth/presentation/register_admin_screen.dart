@@ -3,7 +3,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/theme/app_colors.dart';
-import '../../../core/services/supabase_service.dart';
+import '../../../core/backend/backend.dart';
 import '../../../core/utils/api_helper.dart';
 import '../../../models/models.dart';
 import 'login_screen.dart' show AmbientBackground, FocusableTextField, ScaleButton;
@@ -79,7 +79,7 @@ class _RegisterAdminScreenState extends State<RegisterAdminScreen> {
       final permissions = UserPermission.all(userId).toJson();
       permissions['user_id'] = userId;
 
-      await SupabaseService.upsertUserWithPermissions(
+      await Backend.upsertUserWithPermissions(
         userData: userData,
         permissionData: permissions,
         isNew: true,

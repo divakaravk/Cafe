@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:uuid/uuid.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/services/supabase_service.dart';
+import '../../../../core/backend/backend.dart';
 import '../../../../core/utils/api_helper.dart';
 import '../../../../core/widgets/network_error_view.dart';
 import '../../../../models/inventory_models.dart';
@@ -67,7 +67,7 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen> {
         rawMaterialId: _addMaterialId!,
         qtyPerUnit: qty,
       );
-      await SupabaseService.upsertRecipeLine(line.toJson());
+      await Backend.upsertRecipeLine(line.toJson());
       _qtyController.clear();
       setState(() => _addMaterialId = null);
       await _refresh();
@@ -81,7 +81,7 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen> {
 
   Future<void> _updateQty(VariantRecipe line, double qty) async {
     try {
-      await SupabaseService.upsertRecipeLine(
+      await Backend.upsertRecipeLine(
         VariantRecipe(
           id: line.id,
           itemVariantId: line.itemVariantId,
@@ -98,7 +98,7 @@ class _RecipeEditorScreenState extends ConsumerState<RecipeEditorScreen> {
 
   Future<void> _deleteLine(VariantRecipe line) async {
     try {
-      await SupabaseService.deleteRecipeLine(line.id);
+      await Backend.deleteRecipeLine(line.id);
       await _refresh();
     } catch (e) {
       _snack('Error: $e', AppColors.error);

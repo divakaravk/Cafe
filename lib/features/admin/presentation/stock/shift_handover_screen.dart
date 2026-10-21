@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../../core/theme/app_colors.dart';
-import '../../../../core/services/supabase_service.dart';
+import '../../../../core/backend/backend.dart';
 import '../../../../core/utils/api_helper.dart';
 import '../../../../models/inventory_models.dart';
 import '../../../../models/models.dart';
@@ -165,7 +165,7 @@ class _ShiftHandoverScreenState extends ConsumerState<ShiftHandoverScreen> {
     setState(() => _busy = true);
     final user = ref.read(authStateProvider).value!;
     try {
-      await SupabaseService.submitStockAdjustment(
+      await Backend.submitStockAdjustment(
         companyId: user.companyId,
         rawMaterialId: _materialId!,
         qty: -actualConsumption, // negative: consumption
